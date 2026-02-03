@@ -29,10 +29,14 @@ export interface CrowdMetrics {
   congestionZoneCount: number;
   stampedeProbability: number;
   riskLevel: RiskLevel;
-  // New Features
+  // Features
   agitationLevel: number; // 0-1 measure of erratic movement
   panicIndex: number; // Calculated from density + agitation
   objectCounts: Record<string, number>; // e.g., { "backpack": 2, "suitcase": 1 }
+  // New Features
+  audioLevel: number; // Simulated decibel level 0-100
+  zoneViolations: number; // Count of people in restricted areas
+  averageFlowDirection: number; // Angle in degrees
 }
 
 export interface AIReasoning {
@@ -41,8 +45,15 @@ export interface AIReasoning {
   probability: number;
   countermeasures: string[];
   explanation: string;
-  scenarioDescription: string; // New: Visual description of what is happening
+  scenarioDescription: string;
   alerts: string[];
+}
+
+export interface ChatMessage {
+  id: string;
+  role: 'user' | 'model';
+  text: string;
+  timestamp: number;
 }
 
 export interface Countermeasure {

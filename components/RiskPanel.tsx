@@ -39,6 +39,7 @@ export const RiskPanel: React.FC<RiskPanelProps> = ({ metrics, reasoning, onTrig
         </div>
         
         <div className="grid grid-cols-2 gap-4">
+          {/* Agitation */}
           <div className="p-3 bg-white/5 rounded-xl border border-white/5">
             <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">Crowd Agitation</div>
             <div className="flex items-center gap-2">
@@ -48,15 +49,39 @@ export const RiskPanel: React.FC<RiskPanelProps> = ({ metrics, reasoning, onTrig
                <span className="text-xs font-mono">{(metrics.agitationLevel * 100).toFixed(0)}%</span>
             </div>
           </div>
+          
+          {/* Audio Visualizer Proxy */}
           <div className="p-3 bg-white/5 rounded-xl border border-white/5">
-            <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">Visible Objects</div>
-            <div className="text-xs font-mono text-slate-300 flex flex-wrap gap-2">
-               {Object.entries(metrics.objectCounts || {}).map(([key, val]) => (
-                 <span key={key} className="bg-slate-800 px-1.5 rounded text-[9px] uppercase border border-white/10">{key}:{val}</span>
-               ))}
-               {Object.keys(metrics.objectCounts || {}).length === 0 && <span>None</span>}
-            </div>
+             <div className="flex justify-between items-center mb-1">
+                <div className="text-[10px] text-slate-400 font-bold uppercase">Audio Proxy</div>
+                <div className="text-[9px] text-slate-500 font-mono">~{metrics.audioLevel.toFixed(0)}dB</div>
+             </div>
+             <div className="flex items-end justify-between h-3 gap-0.5">
+                {[...Array(10)].map((_, i) => (
+                    <div 
+                      key={i} 
+                      className={`w-1 rounded-sm transition-all duration-100 ${
+                        (i * 10) < metrics.audioLevel 
+                          ? ((i * 10) > 80 ? 'bg-red-500' : 'bg-emerald-400') 
+                          : 'bg-slate-800'
+                      }`}
+                      style={{ height: `${20 + Math.random() * 80}%` }}
+                    />
+                ))}
+             </div>
           </div>
+        </div>
+
+        {/* Counter Flow & Zone Alerts */}
+        <div className="grid grid-cols-2 gap-4 mt-4">
+           <div className={`px-3 py-2 rounded-lg border flex items-center justify-between ${metrics.counterFlowCount > 2 ? 'bg-orange-500/20 border-orange-500/50 text-orange-400' : 'bg-slate-800/50 border-white/5 text-slate-500'}`}>
+              <span className="text-[10px] font-bold uppercase">Counter-Flow</span>
+              <span className="text-xs font-mono">{metrics.counterFlowCount}</span>
+           </div>
+           <div className={`px-3 py-2 rounded-lg border flex items-center justify-between ${metrics.zoneViolations > 0 ? 'bg-red-500/20 border-red-500/50 text-red-400 animate-pulse' : 'bg-slate-800/50 border-white/5 text-slate-500'}`}>
+              <span className="text-[10px] font-bold uppercase">Zone Violation</span>
+              <span className="text-xs font-mono">{metrics.zoneViolations}</span>
+           </div>
         </div>
       </div>
 
@@ -72,19 +97,16 @@ export const RiskPanel: React.FC<RiskPanelProps> = ({ metrics, reasoning, onTrig
 
         {reasoning ? (
           <div className="space-y-4 mb-6">
-            {/* Scenario Description Feature */}
             {reasoning.scenarioDescription && (
               <div className="p-4 bg-white/5 rounded-xl border-l-2 border-cyan-500">
                 <h4 className="text-[10px] font-bold text-slate-500 uppercase mb-1 tracking-widest">Visual Scenario Assessment</h4>
                 <p className="text-sm text-white italic">"{reasoning.scenarioDescription}"</p>
               </div>
             )}
-
             <div className="p-4 bg-slate-800/50 rounded-xl border border-white/5 shadow-inner">
                <h4 className="text-[10px] font-bold text-slate-500 uppercase mb-1 tracking-widest">Strategic Prediction</h4>
                <p className="text-xs leading-relaxed text-slate-300">{reasoning.prediction}</p>
             </div>
-            
             <div className="p-4 bg-cyan-500/5 rounded-xl border border-cyan-500/10">
               <h4 className="text-[10px] font-bold text-cyan-500 uppercase mb-2 tracking-widest">Tactical Explanation</h4>
               <p className="text-[10px] text-slate-400 leading-relaxed font-mono">{reasoning.explanation}</p>
@@ -99,7 +121,6 @@ export const RiskPanel: React.FC<RiskPanelProps> = ({ metrics, reasoning, onTrig
           </div>
         )}
 
-        {/* Action Button */}
         <button 
           onClick={onTriggerReasoning}
           disabled={isAnalyzing}
@@ -117,7 +138,6 @@ export const RiskPanel: React.FC<RiskPanelProps> = ({ metrics, reasoning, onTrig
           ) : (
             <span>Analyze Current Scenario</span>
           )}
-          {!isAnalyzing && <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300 pointer-events-none opacity-20"></div>}
         </button>
       </div>
     </div>

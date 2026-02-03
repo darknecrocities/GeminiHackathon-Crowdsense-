@@ -15,6 +15,10 @@ interface CameraFeedProps {
   pollingInterval: number;
 }
 
+// Restricted Zone Definition (Normalized Coordinates 0-1)
+// Top Right Corner box
+const RESTRICTED_ZONE = { x: 0.6, y: 0.0, w: 0.4, h: 0.3 };
+
 export const CameraFeed = forwardRef(({ 
   onMetricsUpdate, 
   onDetectionsUpdate,
@@ -29,7 +33,7 @@ export const CameraFeed = forwardRef(({
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
   const hlsRef = useRef<any>(null);
   
-  // Tracking State for Agitation Logic
+  // Tracking State for Agitation & Flow
   const prevDetectionsRef = useRef<Detection[]>([]);
   
   const [isProcessing, setIsProcessing] = useState(false);
@@ -168,7 +172,7 @@ export const CameraFeed = forwardRef(({
 
       const detections = await yoloService.runInference(canvas);
       onDetectionsUpdate(detections);
-      updateMetricsLocally(detections);
+      updateMetricsLocally(detections, sourceWidth, sourceHeight);
       drawOverlays(detections, sourceWidth, sourceHeight);
       
       if (detections.length >= 0) setError(null);
@@ -192,13 +196,13 @@ export const CameraFeed = forwardRef(({
         confidence: 0.9
       }));
       onDetectionsUpdate(detections);
-      updateMetricsLocally(detections);
+      updateMetricsLocally(detections, 1280, 720);
       drawOverlays(detections, 1280, 720);
   };
 
-  // --- ENHANCED CROWD DYNAMICS ENGINE ---
-  const updateMetricsLocally = (detections: Detection[]) => {
-    // 1. Filter People Only for Density
+  // --- ENHANCED PHYSICS ENGINE ---
+  const updateMetricsLocally = (detections: Detection[], width: number, height: number) => {
+    // 1. Filter
     const people = detections.filter(d => d.label === 'person');
     const peopleCount = people.length;
     
@@ -208,67 +212,108 @@ export const CameraFeed = forwardRef(({
       objectCounts[d.label] = (objectCounts[d.label] || 0) + 1;
     });
 
-    // 3. Agitation Calculation (Frame-to-Frame Centroid Delta)
+    // 3. Tracking & Vectors (Agitation + Counter-Flow)
     let totalMovement = 0;
     let matchCount = 0;
+    const vectors: {dx: number, dy: number}[] = [];
     const prev = prevDetectionsRef.current;
     
     people.forEach(curr => {
         const cy = (curr.box_2d[0] + curr.box_2d[2]) / 2;
         const cx = (curr.box_2d[1] + curr.box_2d[3]) / 2;
         
-        // Find nearest in prev frame
+        // Find nearest in prev frame (Greedy Match)
         let minDist = 100000;
+        let matchedPrev = null;
+
         prev.forEach(p => {
              const py = (p.box_2d[0] + p.box_2d[2]) / 2;
              const px = (p.box_2d[1] + p.box_2d[3]) / 2;
              const dist = Math.sqrt(Math.pow(cx - px, 2) + Math.pow(cy - py, 2));
-             if (dist < minDist) minDist = dist;
+             if (dist < minDist) {
+                 minDist = dist;
+                 matchedPrev = { px, py };
+             }
         });
 
-        // Threshold for valid movement (ignore new spawns)
-        if (minDist < 100) { 
+        // Threshold for valid movement 
+        if (minDist < 100 && matchedPrev) { 
            totalMovement += minDist;
+           vectors.push({ dx: cx - matchedPrev.px, dy: cy - matchedPrev.py });
            matchCount++;
         }
     });
 
     const avgMovement = matchCount > 0 ? totalMovement / matchCount : 0;
-    // Normalize agitation: 0 to 1 (Assuming >20px avg movement is "High Agitation")
     const agitationLevel = Math.min(1, avgMovement / 20); 
 
-    prevDetectionsRef.current = people; // Update history
-
-    // 4. Density Calculation
-    const density = peopleCount / 35; // Proxy for people/m2 based on typical FOV
+    // Counter Flow Logic (Feature: True Vector Analysis)
+    let counterFlowCount = 0;
+    let avgFlowAngle = 0;
     
-    // 5. Panic Index (Agitation * Density)
-    // If people are packed AND moving fast, that's panic.
+    if (vectors.length > 2) {
+        // Calculate Average Flow Vector
+        const avgDx = vectors.reduce((acc, v) => acc + v.dx, 0) / vectors.length;
+        const avgDy = vectors.reduce((acc, v) => acc + v.dy, 0) / vectors.length;
+        avgFlowAngle = Math.atan2(avgDy, avgDx); // Radians
+
+        // Check for deviants (>120 degrees offset)
+        counterFlowCount = vectors.filter(v => {
+            const angle = Math.atan2(v.dy, v.dx);
+            const diff = Math.abs(angle - avgFlowAngle);
+            return diff > (Math.PI * 0.66); // > 120 degrees
+        }).length;
+    }
+
+    // Zone Fencing Logic (Feature: Zone Violation)
+    let zoneViolations = 0;
+    people.forEach(p => {
+        const cy = (p.box_2d[0] + p.box_2d[2]) / 2;
+        const cx = (p.box_2d[1] + p.box_2d[3]) / 2;
+        // Normalize
+        const nx = cx / width;
+        const ny = cy / height;
+        
+        if (nx >= RESTRICTED_ZONE.x && nx <= (RESTRICTED_ZONE.x + RESTRICTED_ZONE.w) &&
+            ny >= RESTRICTED_ZONE.y && ny <= (RESTRICTED_ZONE.y + RESTRICTED_ZONE.h)) {
+            zoneViolations++;
+        }
+    });
+
+    prevDetectionsRef.current = people; 
+
+    // Metrics Calculation
+    const density = peopleCount / 35; 
     let panicIndex = 0;
     if (density > 1) {
        panicIndex = (agitationLevel * 0.7) + (Math.min(density, 4) / 4 * 0.3);
     }
     
-    // 6. Risk Level Logic
+    // Feature: Simulated Audio Proxy
+    // Noise is usually correlated with High Density + High Agitation
+    const audioLevel = Math.min(100, (density * 10) + (agitationLevel * 80));
+
     const prob = density > 2.5 ? Math.min(0.95, density / 4) : density / 12;
     let calculatedRisk = geminiService.calcRisk(density, prob);
     
-    // Override Risk if Panic or Weapons detected
-    if (panicIndex > 0.6) calculatedRisk = RiskLevel.CRITICAL;
+    if (panicIndex > 0.6 || zoneViolations > 3 || counterFlowCount > 3) calculatedRisk = RiskLevel.CRITICAL;
     if (objectCounts['knife'] > 0 || objectCounts['baseball bat'] > 0) calculatedRisk = RiskLevel.CRITICAL;
 
     onMetricsUpdate({
       peopleCount,
       density,
       flowRate: 80 + Math.floor(Math.random() * 40),
-      counterFlowCount: Math.floor(density * 1.2),
-      avgVelocity: agitationLevel * 2, // Proxy
+      counterFlowCount,
+      avgVelocity: agitationLevel * 2, 
       congestionZoneCount: density > 2.2 ? 2 : 0,
       stampedeProbability: prob,
       riskLevel: calculatedRisk,
       agitationLevel,
       panicIndex,
-      objectCounts
+      objectCounts,
+      audioLevel,
+      zoneViolations,
+      averageFlowDirection: avgFlowAngle * (180/Math.PI)
     });
   };
 
@@ -287,6 +332,25 @@ export const CameraFeed = forwardRef(({
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+    // Draw Restricted Zone
+    const zw = RESTRICTED_ZONE.w * canvas.width;
+    const zh = RESTRICTED_ZONE.h * canvas.height;
+    const zx = RESTRICTED_ZONE.x * canvas.width;
+    const zy = RESTRICTED_ZONE.y * canvas.height;
+    
+    // Zone Pattern
+    ctx.fillStyle = 'rgba(239, 68, 68, 0.1)';
+    ctx.strokeStyle = '#ef4444';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([10, 5]);
+    ctx.strokeRect(zx, zy, zw, zh);
+    ctx.fillRect(zx, zy, zw, zh);
+    ctx.fillStyle = '#ef4444';
+    ctx.font = '10px monospace';
+    ctx.fillText("RESTRICTED ZONE", zx + 5, zy + 15);
+    ctx.setLineDash([]);
+
+    // Draw Detections
     detections.forEach((det) => {
       const [ymin, xmin, ymax, xmax] = det.box_2d;
       const x = xmin * scaleX;
@@ -294,10 +358,10 @@ export const CameraFeed = forwardRef(({
       const w = (xmax - xmin) * scaleX;
       const h = (ymax - ymin) * scaleY;
 
-      // Color coding based on class
-      let color = '#22d3ee'; // Cyan (Person)
-      if (det.label === 'backpack' || det.label === 'suitcase') color = '#fbbf24'; // Amber
-      if (det.label === 'knife' || det.label === 'baseball bat') color = '#ef4444'; // Red
+      // Color coding
+      let color = '#22d3ee'; 
+      if (det.label === 'backpack' || det.label === 'suitcase') color = '#fbbf24'; 
+      if (det.label === 'knife' || det.label === 'baseball bat') color = '#ef4444'; 
 
       ctx.strokeStyle = color;
       ctx.lineWidth = 2;
@@ -308,11 +372,7 @@ export const CameraFeed = forwardRef(({
       ctx.font = '10px monospace';
       ctx.fillText(`${det.label} ${(det.confidence || 0).toFixed(2)}`, x, y - 5);
       
-      ctx.fillStyle = color.replace(')', ', 0.1)').replace('rgb', 'rgba');
-      if (color.startsWith('#')) {
-         // rough hex to rgba conversion for fill
-         ctx.fillStyle = color + '20';
-      }
+      ctx.fillStyle = color + '20'; // Hex to rgba approx
       ctx.fillRect(x, y, w, h);
     });
   };
@@ -323,7 +383,6 @@ export const CameraFeed = forwardRef(({
     return () => clearInterval(interval);
   }, [isLive, pollingInterval, sourceType, sourceUrl, feedMode, snapshotTrigger]);
 
-  // Error rendering omitted for brevity (same as previous)
   return (
     <div className="relative w-full h-full bg-slate-950 rounded-2xl overflow-hidden border border-white/5 group">
       {/* Video/Image Elements */}
