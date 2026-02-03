@@ -1,0 +1,7 @@
+{
+  "name": "CrowdSense™ Intelligence",
+  "description": "Enterprise-grade real-time crowd risk intelligence platform featuring predictive Gemini AI reasoning, flow analytics, and interactive countermeasure systems.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
