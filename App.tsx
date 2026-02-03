@@ -9,10 +9,12 @@ import { CountermeasureChecklist } from './components/CountermeasureChecklist';
 import { ModelManager } from './components/ModelManager';
 import { GeoMap } from './components/GeoMap';
 import { ChatInterface } from './components/ChatInterface';
+import { SplashScreen } from './components/SplashScreen'; // Import Splash
 import { CrowdMetrics, Detection, AIReasoning, RiskLevel } from './types';
 import { geminiService } from './services/geminiService';
 
 const App: React.FC = () => {
+  const [showSplash, setShowSplash] = useState(true); // Splash State
   const [activeTab, setActiveTab] = useState('dashboard');
   const [metrics, setMetrics] = useState<CrowdMetrics>({
     peopleCount: 0, 
@@ -85,6 +87,11 @@ const App: React.FC = () => {
     if (!ipInput) return;
     setSourceUrl(ipInput);
   };
+
+  // Render Splash Screen if active
+  if (showSplash) {
+    return <SplashScreen onComplete={() => setShowSplash(false)} />;
+  }
 
   const isCameraVisible = activeTab === 'dashboard' || activeTab === 'camera';
 
