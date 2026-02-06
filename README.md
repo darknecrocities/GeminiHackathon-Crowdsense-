@@ -39,7 +39,7 @@ Managing large crowds at stadiums, transport hubs, and public events is traditio
 ### 🛠️ Operational Resilience
 9.  **Synthetic Scenario Engine:** A built-in "Digital Twin" simulator that generates GPU-accelerated crowd particles. This allows commanders to stress-test their response protocols against theoretical surges without risking real lives.
 10. **Legacy Protocol Bridge:** A smart ingestion layer that modernizes old infrastructure. It intelligently transcodes and buffers RTSP/MJPEG streams from aging IP cameras, allowing 10-year-old CCTV systems to run state-of-the-art AI.
-
+11. **Audio Ambience Analysis:** Using Gemini 3.0 Multimodal capabilities to detect screams or panic in audio streams.
 ---
 
 ## 🛠️ Tech Stack
@@ -101,7 +101,6 @@ Managing large crowds at stadiums, transport hubs, and public events is traditio
 
 ## 🔮 Future Roadmap
 - [ ] **Multi-Camera Fusion:** Stitching views from multiple IP cams into a single floor plan.
-- [ ] **Audio Ambience Analysis:** Using Gemini 3.0 Multimodal capabilities to detect screams or panic in audio streams.
 - [ ] **IoT Integration:** Automatically triggering electronic gates or signage based on Gemini's "Countermeasures" output.
 
 ---
