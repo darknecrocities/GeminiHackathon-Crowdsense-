@@ -1,5 +1,5 @@
 
-import React, { useRef, useEffect, useState, useImperativeHandle, forwardRef } from 'react';
+import React, { useRef, useEffect, useState, useImperativeHandle, forwardRef, useCallback } from 'react';
 import { Detection, CrowdMetrics, RiskLevel } from '../types';
 import { geminiService } from '../services/geminiService';
 import { yoloService } from '../services/yoloService';
@@ -19,8 +19,8 @@ interface CameraFeedProps {
 // Top Right Corner box
 const RESTRICTED_ZONE = { x: 0.6, y: 0.0, w: 0.4, h: 0.3 };
 
-export const CameraFeed = forwardRef(({ 
-  onMetricsUpdate, 
+export const CameraFeed = forwardRef(({
+  onMetricsUpdate,
   onDetectionsUpdate,
   sourceType,
   sourceUrl,
@@ -32,24 +32,29 @@ export const CameraFeed = forwardRef(({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
   const hlsRef = useRef<any>(null);
-  
+  const streamRef = useRef<MediaStream | null>(null);
+
   // Tracking State for Agitation & Flow
   const prevDetectionsRef = useRef<Detection[]>([]);
-  
+
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [feedMode, setFeedMode] = useState<'video' | 'snapshot'>('video');
   const [snapshotTrigger, setSnapshotTrigger] = useState(0);
+  const [cameraReady, setCameraReady] = useState(false);
 
   useImperativeHandle(ref, () => ({
     triggerManualScan: () => captureAndAnalyze()
   }));
 
-  // cleanup HLS on unmount
+  // cleanup HLS and streams on unmount
   useEffect(() => {
     return () => {
       if (hlsRef.current) {
         hlsRef.current.destroy();
+      }
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
       }
     };
   }, []);
@@ -58,8 +63,13 @@ export const CameraFeed = forwardRef(({
   useEffect(() => {
     setError(null);
     setFeedMode('video');
-    
+    setCameraReady(false);
+
     // Stop previous streams
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
     if (videoRef.current) {
       videoRef.current.pause();
       videoRef.current.src = "";
@@ -75,50 +85,115 @@ export const CameraFeed = forwardRef(({
 
       if (sourceType === 'webcam') {
         try {
-          const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720 } });
-          if (videoRef.current) {
-             videoRef.current.srcObject = stream;
-             videoRef.current.play();
+          if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            setError("Camera API not available. Please use HTTPS or localhost.");
+            return;
           }
-        } catch (e) {
-          setError("Camera access denied. Check browser permissions.");
+          const stream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+              facingMode: 'environment'
+            }
+          });
+          streamRef.current = stream;
+          if (videoRef.current) {
+            videoRef.current.srcObject = stream;
+            videoRef.current.onloadedmetadata = () => {
+              videoRef.current?.play().then(() => {
+                setCameraReady(true);
+                setError(null);
+              }).catch(e => {
+                console.error("Play failed:", e);
+                setError("Camera play failed. Click anywhere on the page first (browser autoplay policy).");
+              });
+            };
+          }
+        } catch (e: any) {
+          console.error("Camera error:", e);
+          if (e.name === 'NotAllowedError') {
+            setError("Camera access denied. Please allow camera permission in your browser and refresh.");
+          } else if (e.name === 'NotFoundError') {
+            setError("No camera found. Please connect a camera and refresh.");
+          } else if (e.name === 'NotReadableError') {
+            setError("Camera is in use by another application. Close other apps using the camera.");
+          } else {
+            setError(`Camera error: ${e.message || e.name}`);
+          }
         }
-      } 
+      }
       else if (sourceType === 'file' && sourceUrl) {
         if (videoRef.current) {
           videoRef.current.src = sourceUrl;
           videoRef.current.load();
-          videoRef.current.play();
+          videoRef.current.onloadeddata = () => {
+            setCameraReady(true);
+            videoRef.current?.play();
+          };
         }
       }
       else if (sourceType === 'ipcam' && sourceUrl) {
         if (sourceUrl.startsWith('rtsp')) {
-          setError("RTSP_PROTOCOL_MISMATCH"); 
+          setError("RTSP streams are not supported in the browser. Use an HTTP/MJPEG/HLS stream instead.");
           return;
         }
-        if (sourceUrl.includes('.jpg') || sourceUrl.includes('snapshot')) {
+        // MJPEG snapshot mode
+        if (sourceUrl.includes('.jpg') || sourceUrl.includes('snapshot') || sourceUrl.includes('mjpg')) {
           setFeedMode('snapshot');
+          setCameraReady(true);
           return;
         }
-        if (Hls.isSupported() && sourceUrl.endsWith('.m3u8')) {
-          const hls = new Hls();
-          hls.loadSource(sourceUrl);
-          hls.attachMedia(videoRef.current);
-          hlsRef.current = hls;
-          hls.on(Hls.Events.MANIFEST_PARSED, () => {
-             videoRef.current?.play().catch(e => console.error("Autoplay blocked", e));
-          });
-          hls.on(Hls.Events.ERROR, (event: any, data: any) => {
-             if (data.fatal) {
-               setError(`HLS Error: ${data.type}`);
-             }
-          });
-        } else {
+        // HLS stream
+        if (sourceUrl.endsWith('.m3u8')) {
+          try {
+            if (typeof Hls !== 'undefined' && Hls.isSupported()) {
+              const hls = new Hls({
+                enableWorker: true,
+                lowLatencyMode: true,
+              });
+              hls.loadSource(sourceUrl);
+              hls.attachMedia(videoRef.current);
+              hlsRef.current = hls;
+              hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                setCameraReady(true);
+                videoRef.current?.play().catch(e => console.error("Autoplay blocked", e));
+              });
+              hls.on(Hls.Events.ERROR, (_event: any, data: any) => {
+                if (data.fatal) {
+                  setError(`HLS Stream Error: ${data.type}. Check the stream URL.`);
+                }
+              });
+            } else if (videoRef.current?.canPlayType('application/vnd.apple.mpegurl')) {
+              // Native HLS support (Safari)
+              videoRef.current.src = sourceUrl;
+              videoRef.current.onloadeddata = () => {
+                setCameraReady(true);
+                videoRef.current?.play();
+              };
+            } else {
+              setError("HLS.js library not loaded. Check your internet connection.");
+            }
+          } catch (e) {
+            setError("Failed to initialize HLS stream.");
+          }
+        }
+        // Direct video stream (MJPEG over HTTP, etc.)
+        else {
           if (videoRef.current) {
-            videoRef.current.crossOrigin = "anonymous"; 
+            videoRef.current.crossOrigin = "anonymous";
             videoRef.current.src = sourceUrl;
-            videoRef.current.play().catch(e => {
-               setError("STREAM_CONNECTION_FAILED");
+            videoRef.current.onloadeddata = () => {
+              setCameraReady(true);
+            };
+            videoRef.current.onerror = () => {
+              // Try as MJPEG snapshot instead
+              setFeedMode('snapshot');
+              setCameraReady(true);
+            };
+            videoRef.current.play().catch(_e => {
+              // If direct play fails, try snapshot mode
+              setFeedMode('snapshot');
+              setCameraReady(true);
             });
           }
         }
@@ -127,13 +202,15 @@ export const CameraFeed = forwardRef(({
 
     if (sourceType !== 'simulation') {
       initCamera();
+    } else {
+      setCameraReady(true);
     }
 
   }, [sourceType, sourceUrl]);
 
-  const captureAndAnalyze = async () => {
+  const captureAndAnalyze = useCallback(async () => {
     if (isProcessing || !canvasRef.current || !overlayCanvasRef.current) return;
-    
+
     if (sourceType === 'simulation') {
       runSimulation();
       return;
@@ -174,30 +251,30 @@ export const CameraFeed = forwardRef(({
       onDetectionsUpdate(detections);
       updateMetricsLocally(detections, sourceWidth, sourceHeight);
       drawOverlays(detections, sourceWidth, sourceHeight);
-      
+
       if (detections.length >= 0) setError(null);
 
     } catch (e: any) {
       console.error("Inference Error:", e);
       if (e.message?.includes("Tainted")) {
-        setError("CORS_SECURITY_BLOCK");
+        setError("CORS blocked: The video source doesn't allow cross-origin access.");
       }
     } finally {
       setIsProcessing(false);
     }
-  };
+  }, [isProcessing, sourceType, feedMode, isLive, onDetectionsUpdate, onMetricsUpdate]);
 
   const runSimulation = () => {
-      const mockCount = 15 + Math.floor(Math.random() * 20);
-      const detections: Detection[] = Array.from({ length: mockCount }, (_, i) => ({
-        id: `sim-${i}`,
-        box_2d: [Math.random() * 800, Math.random() * 800, 200 + Math.random() * 800, 200 + Math.random() * 800],
-        label: Math.random() > 0.8 ? "backpack" : "person",
-        confidence: 0.9
-      }));
-      onDetectionsUpdate(detections);
-      updateMetricsLocally(detections, 1280, 720);
-      drawOverlays(detections, 1280, 720);
+    const mockCount = 15 + Math.floor(Math.random() * 20);
+    const detections: Detection[] = Array.from({ length: mockCount }, (_, i) => ({
+      id: `sim-${i}`,
+      box_2d: [Math.random() * 800, Math.random() * 800, 200 + Math.random() * 800, 200 + Math.random() * 800],
+      label: Math.random() > 0.8 ? "backpack" : "person",
+      confidence: 0.9
+    }));
+    onDetectionsUpdate(detections);
+    updateMetricsLocally(detections, 1280, 720);
+    drawOverlays(detections, 1280, 720);
   };
 
   // --- ENHANCED PHYSICS ENGINE ---
@@ -205,7 +282,7 @@ export const CameraFeed = forwardRef(({
     // 1. Filter
     const people = detections.filter(d => d.label === 'person');
     const peopleCount = people.length;
-    
+
     // 2. Object Histogram
     const objectCounts: Record<string, number> = {};
     detections.forEach(d => {
@@ -215,87 +292,87 @@ export const CameraFeed = forwardRef(({
     // 3. Tracking & Vectors (Agitation + Counter-Flow)
     let totalMovement = 0;
     let matchCount = 0;
-    const vectors: {dx: number, dy: number}[] = [];
+    const vectors: { dx: number, dy: number }[] = [];
     const prev = prevDetectionsRef.current;
-    
+
     people.forEach(curr => {
-        const cy = (curr.box_2d[0] + curr.box_2d[2]) / 2;
-        const cx = (curr.box_2d[1] + curr.box_2d[3]) / 2;
-        
-        // Find nearest in prev frame (Greedy Match)
-        let minDist = 100000;
-        let matchedPrev = null;
+      const cy = (curr.box_2d[0] + curr.box_2d[2]) / 2;
+      const cx = (curr.box_2d[1] + curr.box_2d[3]) / 2;
 
-        prev.forEach(p => {
-             const py = (p.box_2d[0] + p.box_2d[2]) / 2;
-             const px = (p.box_2d[1] + p.box_2d[3]) / 2;
-             const dist = Math.sqrt(Math.pow(cx - px, 2) + Math.pow(cy - py, 2));
-             if (dist < minDist) {
-                 minDist = dist;
-                 matchedPrev = { px, py };
-             }
-        });
+      // Find nearest in prev frame (Greedy Match)
+      let minDist = 100000;
+      let matchedPrev: { px: number; py: number } | null = null;
 
-        // Threshold for valid movement 
-        if (minDist < 100 && matchedPrev) { 
-           totalMovement += minDist;
-           vectors.push({ dx: cx - matchedPrev.px, dy: cy - matchedPrev.py });
-           matchCount++;
+      prev.forEach(p => {
+        const py = (p.box_2d[0] + p.box_2d[2]) / 2;
+        const px = (p.box_2d[1] + p.box_2d[3]) / 2;
+        const dist = Math.sqrt(Math.pow(cx - px, 2) + Math.pow(cy - py, 2));
+        if (dist < minDist) {
+          minDist = dist;
+          matchedPrev = { px, py };
         }
+      });
+
+      // Threshold for valid movement 
+      if (minDist < 100 && matchedPrev) {
+        totalMovement += minDist;
+        vectors.push({ dx: cx - matchedPrev.px, dy: cy - matchedPrev.py });
+        matchCount++;
+      }
     });
 
     const avgMovement = matchCount > 0 ? totalMovement / matchCount : 0;
-    const agitationLevel = Math.min(1, avgMovement / 20); 
+    const agitationLevel = Math.min(1, avgMovement / 20);
 
     // Counter Flow Logic (Feature: True Vector Analysis)
     let counterFlowCount = 0;
     let avgFlowAngle = 0;
-    
-    if (vectors.length > 2) {
-        // Calculate Average Flow Vector
-        const avgDx = vectors.reduce((acc, v) => acc + v.dx, 0) / vectors.length;
-        const avgDy = vectors.reduce((acc, v) => acc + v.dy, 0) / vectors.length;
-        avgFlowAngle = Math.atan2(avgDy, avgDx); // Radians
 
-        // Check for deviants (>120 degrees offset)
-        counterFlowCount = vectors.filter(v => {
-            const angle = Math.atan2(v.dy, v.dx);
-            const diff = Math.abs(angle - avgFlowAngle);
-            return diff > (Math.PI * 0.66); // > 120 degrees
-        }).length;
+    if (vectors.length > 2) {
+      // Calculate Average Flow Vector
+      const avgDx = vectors.reduce((acc, v) => acc + v.dx, 0) / vectors.length;
+      const avgDy = vectors.reduce((acc, v) => acc + v.dy, 0) / vectors.length;
+      avgFlowAngle = Math.atan2(avgDy, avgDx); // Radians
+
+      // Check for deviants (>120 degrees offset)
+      counterFlowCount = vectors.filter(v => {
+        const angle = Math.atan2(v.dy, v.dx);
+        const diff = Math.abs(angle - avgFlowAngle);
+        return diff > (Math.PI * 0.66); // > 120 degrees
+      }).length;
     }
 
     // Zone Fencing Logic (Feature: Zone Violation)
     let zoneViolations = 0;
     people.forEach(p => {
-        const cy = (p.box_2d[0] + p.box_2d[2]) / 2;
-        const cx = (p.box_2d[1] + p.box_2d[3]) / 2;
-        // Normalize
-        const nx = cx / width;
-        const ny = cy / height;
-        
-        if (nx >= RESTRICTED_ZONE.x && nx <= (RESTRICTED_ZONE.x + RESTRICTED_ZONE.w) &&
-            ny >= RESTRICTED_ZONE.y && ny <= (RESTRICTED_ZONE.y + RESTRICTED_ZONE.h)) {
-            zoneViolations++;
-        }
+      const cy = (p.box_2d[0] + p.box_2d[2]) / 2;
+      const cx = (p.box_2d[1] + p.box_2d[3]) / 2;
+      // Normalize
+      const nx = cx / width;
+      const ny = cy / height;
+
+      if (nx >= RESTRICTED_ZONE.x && nx <= (RESTRICTED_ZONE.x + RESTRICTED_ZONE.w) &&
+        ny >= RESTRICTED_ZONE.y && ny <= (RESTRICTED_ZONE.y + RESTRICTED_ZONE.h)) {
+        zoneViolations++;
+      }
     });
 
-    prevDetectionsRef.current = people; 
+    prevDetectionsRef.current = people;
 
     // Metrics Calculation
-    const density = peopleCount / 35; 
+    const density = peopleCount / 35;
     let panicIndex = 0;
     if (density > 1) {
-       panicIndex = (agitationLevel * 0.7) + (Math.min(density, 4) / 4 * 0.3);
+      panicIndex = (agitationLevel * 0.7) + (Math.min(density, 4) / 4 * 0.3);
     }
-    
+
     // Feature: Simulated Audio Proxy
     // Noise is usually correlated with High Density + High Agitation
     const audioLevel = Math.min(100, (density * 10) + (agitationLevel * 80));
 
     const prob = density > 2.5 ? Math.min(0.95, density / 4) : density / 12;
     let calculatedRisk = geminiService.calcRisk(density, prob);
-    
+
     if (panicIndex > 0.6 || zoneViolations > 3 || counterFlowCount > 3) calculatedRisk = RiskLevel.CRITICAL;
     if (objectCounts['knife'] > 0 || objectCounts['baseball bat'] > 0) calculatedRisk = RiskLevel.CRITICAL;
 
@@ -304,7 +381,7 @@ export const CameraFeed = forwardRef(({
       density,
       flowRate: 80 + Math.floor(Math.random() * 40),
       counterFlowCount,
-      avgVelocity: agitationLevel * 2, 
+      avgVelocity: agitationLevel * 2,
       congestionZoneCount: density > 2.2 ? 2 : 0,
       stampedeProbability: prob,
       riskLevel: calculatedRisk,
@@ -313,7 +390,7 @@ export const CameraFeed = forwardRef(({
       objectCounts,
       audioLevel,
       zoneViolations,
-      averageFlowDirection: avgFlowAngle * (180/Math.PI)
+      averageFlowDirection: avgFlowAngle * (180 / Math.PI)
     });
   };
 
@@ -337,7 +414,7 @@ export const CameraFeed = forwardRef(({
     const zh = RESTRICTED_ZONE.h * canvas.height;
     const zx = RESTRICTED_ZONE.x * canvas.width;
     const zy = RESTRICTED_ZONE.y * canvas.height;
-    
+
     // Zone Pattern
     ctx.fillStyle = 'rgba(239, 68, 68, 0.1)';
     ctx.strokeStyle = '#ef4444';
@@ -359,57 +436,90 @@ export const CameraFeed = forwardRef(({
       const h = (ymax - ymin) * scaleY;
 
       // Color coding
-      let color = '#22d3ee'; 
-      if (det.label === 'backpack' || det.label === 'suitcase') color = '#fbbf24'; 
-      if (det.label === 'knife' || det.label === 'baseball bat') color = '#ef4444'; 
+      let color = '#22d3ee';
+      if (det.label === 'backpack' || det.label === 'suitcase') color = '#fbbf24';
+      if (det.label === 'knife' || det.label === 'baseball bat') color = '#ef4444';
 
       ctx.strokeStyle = color;
       ctx.lineWidth = 2;
       ctx.strokeRect(x, y, w, h);
-      
+
       ctx.fillStyle = color;
       ctx.globalAlpha = 1;
       ctx.font = '10px monospace';
       ctx.fillText(`${det.label} ${(det.confidence || 0).toFixed(2)}`, x, y - 5);
-      
+
       ctx.fillStyle = color + '20'; // Hex to rgba approx
       ctx.fillRect(x, y, w, h);
     });
   };
 
+  // Use ref-based interval to avoid stale closure issues
+  const captureRef = useRef(captureAndAnalyze);
+  captureRef.current = captureAndAnalyze;
+
   useEffect(() => {
-    if (!isLive) return;
-    const interval = setInterval(captureAndAnalyze, pollingInterval);
+    if (!isLive || !cameraReady) return;
+    const interval = setInterval(() => captureRef.current(), pollingInterval);
     return () => clearInterval(interval);
-  }, [isLive, pollingInterval, sourceType, sourceUrl, feedMode, snapshotTrigger]);
+  }, [isLive, pollingInterval, cameraReady]);
 
   return (
     <div className="relative w-full h-full bg-slate-950 rounded-2xl overflow-hidden border border-white/5 group">
       {/* Video/Image Elements */}
       {sourceType !== 'simulation' && feedMode === 'video' && (
-        <video ref={videoRef} playsInline muted loop={sourceType === 'file'} className="w-full h-full object-contain" crossOrigin="anonymous"/>
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          muted
+          loop={sourceType === 'file'}
+          className="w-full h-full object-contain"
+        />
       )}
       {sourceType !== 'simulation' && feedMode === 'snapshot' && sourceUrl && (
-        <img ref={imgRef} src={`${sourceUrl}${sourceUrl.includes('?') ? '&' : '?'}t=${snapshotTrigger}`} className="w-full h-full object-contain" crossOrigin="anonymous"/>
+        <img ref={imgRef} src={`${sourceUrl}${sourceUrl.includes('?') ? '&' : '?'}t=${snapshotTrigger}`} className="w-full h-full object-contain" crossOrigin="anonymous" />
       )}
       {sourceType === 'simulation' && (
         <div className="w-full h-full flex flex-col items-center justify-center bg-slate-900 relative overflow-hidden">
-           <div className="absolute inset-0 opacity-20 bg-[radial-gradient(#22d3ee_1px,transparent_1px)] [background-size:20px_20px]"></div>
-           <div className="absolute inset-0 flex items-center justify-center">
-             <span className="text-cyan-500/10 font-black text-6xl tracking-tighter italic select-none">SYNTHETIC CORE</span>
-           </div>
+          <div className="absolute inset-0 opacity-20 bg-[radial-gradient(#22d3ee_1px,transparent_1px)] [background-size:20px_20px]"></div>
+          <div className="absolute inset-0 flex items-center justify-center">
+            <span className="text-cyan-500/10 font-black text-6xl tracking-tighter italic select-none">SYNTHETIC CORE</span>
+          </div>
         </div>
       )}
 
       <canvas ref={canvasRef} className="hidden" />
       <canvas ref={overlayCanvasRef} className="absolute inset-0 pointer-events-none z-20" />
       <div className="scanline opacity-20 pointer-events-none"></div>
-      
+
+      {/* Error Display */}
+      {error && (
+        <div className="absolute inset-0 flex items-center justify-center z-30 bg-slate-950/80 backdrop-blur-sm">
+          <div className="glass p-6 rounded-2xl border border-red-500/30 max-w-md text-center">
+            <div className="text-red-400 text-3xl mb-3">⚠️</div>
+            <h4 className="text-red-400 font-bold text-sm uppercase mb-2">Connection Error</h4>
+            <p className="text-slate-300 text-xs leading-relaxed">{error}</p>
+            <button
+              onClick={() => { setError(null); window.location.reload(); }}
+              className="mt-4 px-4 py-2 bg-red-500/20 border border-red-500/30 rounded-lg text-red-400 text-xs font-bold uppercase hover:bg-red-500/30 transition-all"
+            >
+              Retry
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Metric Overlay HUD */}
       <div className="absolute bottom-6 left-6 z-30 flex flex-col gap-1 pointer-events-none">
         <div className="glass px-2 py-0.5 rounded text-[8px] font-mono text-cyan-400 uppercase border border-cyan-500/30 inline-block w-fit">
           Source: {sourceType.toUpperCase()}
         </div>
+        {cameraReady && (
+          <div className="glass px-2 py-0.5 rounded text-[8px] font-mono text-emerald-400 uppercase border border-emerald-500/30 inline-block w-fit">
+            ● CONNECTED
+          </div>
+        )}
       </div>
     </div>
   );

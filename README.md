@@ -57,6 +57,77 @@ Managing large crowds at stadiums, transport hubs, and public events is traditio
 
 ---
 
+### Intelligence Architecture
+
+#### System Architecture
+```mermaid
+graph TD
+    subgraph "Client Side (Browser Engine)"
+        A[Video Source: Webcam/File/URL] --> B[CameraFeed Component]
+        B --> C[YoloService: ONNX Runtime]
+        C -- "Raw Detections" --> D[Metrics Engine]
+        D -- "CrowdMetrics Telemetry" --> E[App State]
+        E --> F[UI Components: Dashboards/Maps]
+    end
+
+    subgraph "Intelligence Core (Cloud)"
+        E -- "Anonymized Metadata (JSON)" --> G[GeminiService: Google GenAI API]
+        G -- "Strategic Reasoning & Protocols" --> E
+    end
+
+    subgraph "Operational Output"
+        E --> H[Alert System]
+        E --> I[Interactive Crisis Checklists]
+        E --> J[AI Tactical Commander Chat]
+    end
+```
+
+#### Data Relationship Diagram (ERD)
+```mermaid
+erDiagram
+    CrowdMetrics {
+        int peopleCount
+        float density
+        float flowRate
+        float agitationLevel
+        float panicIndex
+        string riskLevel
+        int zoneViolations
+    }
+    Detection {
+        string id
+        string label
+        float confidence
+        float[] box_2d
+    }
+    AIReasoning {
+        string prediction
+        string scenarioDescription
+        float probability
+        string[] countermeasures
+        string[] alerts
+    }
+    ChatMessage {
+        string id
+        string role
+        string text
+        timestamp timestamp
+    }
+    Countermeasure {
+        string id
+        string label
+        string status
+        string priority
+    }
+
+    CrowdMetrics ||--o{ Detection : "processed from"
+    CrowdMetrics ||--|| AIReasoning : "analyzed by"
+    AIReasoning ||--o{ Countermeasure : "suggests"
+    ChatMessage }o--|| CrowdMetrics : "contextualized by"
+```
+
+---
+
 ## 🚀 How It Works
 
 1.  **Ingestion:** Video is captured via Webcam, File Upload, or IP Camera Stream (HTTP/MJPEG).
@@ -90,7 +161,10 @@ Managing large crowds at stadiums, transport hubs, and public events is traditio
     ```
 
 3.  **Set up API Key**
-    The app uses the Google AI Studio client integration. You will be prompted to select your key via the secure popup upon launching the app.
+    Create a `.env` file in the root directory and add your key:
+    ```env
+    VITE_GEMINI_API_KEY=your_actual_key_here
+    ```
 
 4.  **Run Development Server**
     ```bash

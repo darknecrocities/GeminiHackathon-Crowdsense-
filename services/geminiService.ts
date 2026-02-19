@@ -4,7 +4,7 @@ import { CrowdMetrics, AIReasoning, Detection, RiskLevel, ChatMessage } from "..
 
 export class GeminiService {
   private getClient() {
-    return new GoogleGenAI({ apiKey: process.env.API_KEY! });
+    return new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
   }
 
   // Core Strategic Analysis
@@ -80,9 +80,9 @@ export class GeminiService {
   // Feature: Shift Report Generation
   async generateShiftReport(metricHistory: CrowdMetrics[]): Promise<string> {
     const ai = this.getClient();
-    
+
     // Sample history to avoid token limits
-    const samples = metricHistory.filter((_, i) => i % 10 === 0); 
+    const samples = metricHistory.filter((_, i) => i % 10 === 0);
     const peakDensity = Math.max(...metricHistory.map(m => m.density));
     const avgRisk = metricHistory[Math.floor(metricHistory.length / 2)]?.riskLevel || "LOW";
 
