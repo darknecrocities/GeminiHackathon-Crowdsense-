@@ -20,24 +20,64 @@ const SAFETY_RELEVANT_CLASSES = new Set([
   "person", "backpack", "handbag", "suitcase", "cell phone", "baseball bat", "knife", "bottle"
 ]);
 
+// ONNX Runtime configuration is handled inside the loading methods to ensure 'ort' is available
+
 export class YoloService {
   private session: any = null;
   private isModelLoaded = false;
+  private isCurrentlyLoading = false;
   private modelConfig = {
     width: 640,
     height: 640
   };
 
+  async loadModelFromUrl(url: string): Promise<boolean> {
+    if (this.isModelLoaded) return true;
+    if (this.isCurrentlyLoading) return false;
+
+    try {
+      this.isCurrentlyLoading = true;
+      console.log(`[YOLO] Fetching model from: ${url}`);
+      const response = await fetch(url);
+      console.log(`[YOLO] Fetch Status: ${response.status} (${response.statusText})`);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch model from ${url}: ${response.statusText}`);
+      }
+      const modelBuffer = await response.arrayBuffer();
+      console.log(`[YOLO] Model data received. Size: ${modelBuffer.byteLength} bytes`);
+      const success = await this.loadModel(modelBuffer);
+      this.isCurrentlyLoading = false;
+      return success;
+    } catch (e) {
+      this.isCurrentlyLoading = false;
+      console.error("[YOLO] CRITICAL: loadModelFromUrl failed!");
+      console.error("[YOLO] Error details:", e);
+      return false;
+    }
+  }
+
   async loadModel(modelBuffer: ArrayBuffer) {
     try {
+      console.log("[YOLO] Initializing ONNX InferenceSession (WASM backend)...");
+
+      // Force configuration BEFORE session creation
+      if (typeof ort !== 'undefined') {
+        ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/";
+        ort.env.wasm.numThreads = 1;
+        ort.env.wasm.simd = false;
+        ort.env.wasm.proxy = true; // Use proxy for better stability (WebWorker)
+      }
+
       this.session = await ort.InferenceSession.create(modelBuffer, {
-        executionProviders: ['webgl', 'wasm'], 
+        executionProviders: ['wasm'],
         graphOptimizationLevel: 'all'
       });
+      console.log("[YOLO] SUCCESS: Model loaded and ready.");
       this.isModelLoaded = true;
       return true;
     } catch (e) {
-      console.error("YOLO Load Error:", e);
+      console.error("[YOLO] CRITICAL: InferenceSession creation failed!");
+      console.error("[YOLO] Error details:", e);
       return false;
     }
   }
@@ -49,24 +89,24 @@ export class YoloService {
       const { width, height } = this.modelConfig;
       const ctx = document.createElement('canvas').getContext('2d');
       if (!ctx) return [];
-      
+
       ctx.canvas.width = width;
       ctx.canvas.height = height;
       ctx.drawImage(canvas, 0, 0, width, height);
-      
+
       const imageData = ctx.getImageData(0, 0, width, height);
       const input = new Float32Array(width * height * 3);
-      
+
       for (let i = 0; i < imageData.data.length / 4; i++) {
-        input[i] = imageData.data[i * 4] / 255.0; 
-        input[i + width * height] = imageData.data[i * 4 + 1] / 255.0; 
-        input[i + 2 * width * height] = imageData.data[i * 4 + 2] / 255.0; 
+        input[i] = imageData.data[i * 4] / 255.0;
+        input[i + width * height] = imageData.data[i * 4 + 1] / 255.0;
+        input[i + 2 * width * height] = imageData.data[i * 4 + 2] / 255.0;
       }
 
       const tensor = new ort.Tensor('float32', input, [1, 3, width, height]);
       const feeds = { [this.session.inputNames[0]]: tensor };
       const results = await this.session.run(feeds);
-      
+
       return this.processOutput(results[this.session.outputNames[0]]);
     } catch (e) {
       console.error("Inference Error:", e);
@@ -88,7 +128,7 @@ export class YoloService {
     const intersectionArea = (xRight - xLeft) * (yBottom - yTop);
     const areaA = (xmaxA - xminA) * (ymaxA - yminA);
     const areaB = (xmaxB - xminB) * (ymaxB - yminB);
-    
+
     return intersectionArea / (areaA + areaB - intersectionArea);
   }
 
@@ -114,17 +154,17 @@ export class YoloService {
     const data = outputTensor.data;
     // YOLO v8 Output shape: [1, 4 + num_classes, 8400]
     const dims = outputTensor.dims;
-    const numClasses = dims[1] - 4; 
+    const numClasses = dims[1] - 4;
     const numDetections = dims[2];
-    
+
     const scoreThreshold = 0.4;
     const iouThreshold = 0.5;
-    
+
     for (let i = 0; i < numDetections; i++) {
       // Find max score among classes
       let maxScore = 0;
       let maxClassIndex = -1;
-      
+
       for (let c = 0; c < numClasses; c++) {
         const score = data[(4 + c) * numDetections + i];
         if (score > maxScore) {
@@ -135,34 +175,34 @@ export class YoloService {
 
       if (maxScore > scoreThreshold) {
         const label = COCO_LABELS[maxClassIndex] || "unknown";
-        
+
         // Filter: Only process safety-relevant objects
         if (SAFETY_RELEVANT_CLASSES.has(label)) {
-            const xc = data[0 * numDetections + i];
-            const yc = data[1 * numDetections + i];
-            const w = data[2 * numDetections + i];
-            const h = data[3 * numDetections + i];
+          const xc = data[0 * numDetections + i];
+          const yc = data[1 * numDetections + i];
+          const w = data[2 * numDetections + i];
+          const h = data[3 * numDetections + i];
 
-            const scale = 1000 / 640;
-            candidates.push({
+          const scale = 1000 / 640;
+          candidates.push({
             id: `obj-${i}`,
             box_2d: [
-                (yc - h / 2) * scale,
-                (xc - w / 2) * scale,
-                (yc + h / 2) * scale,
-                (xc + w / 2) * scale
+              (yc - h / 2) * scale,
+              (xc - w / 2) * scale,
+              (yc + h / 2) * scale,
+              (xc + w / 2) * scale
             ],
             label: label,
             confidence: maxScore
-            });
+          });
         }
       }
     }
-    
+
     if (candidates.length === 0) return this.mockDetections();
-    
+
     const filtered = this.nonMaxSuppression(candidates, iouThreshold);
-    return filtered.slice(0, 50); 
+    return filtered.slice(0, 50);
   }
 
   private mockDetections(): Detection[] {

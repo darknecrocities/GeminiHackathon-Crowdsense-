@@ -4,13 +4,18 @@ import { CrowdMetrics, AIReasoning, Detection, RiskLevel, ChatMessage } from "..
 
 export class GeminiService {
   private getClient() {
-    return new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
+    const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+    if (!apiKey || apiKey === 'YOUR_API_KEY_HERE') {
+      console.warn("WARNING: VITE_GEMINI_API_KEY is missing or using placeholder!");
+    }
+    return new GoogleGenAI({ apiKey: apiKey });
   }
 
   // Core Strategic Analysis
   async getStrategicFeedback(metrics: CrowdMetrics, detections: Detection[]): Promise<AIReasoning> {
     const ai = this.getClient();
     try {
+      console.log("Starting Gemini Strategic Analysis with metrics:", metrics);
       const summary = this.formatMetricsForAI(metrics);
 
       const response = await ai.models.generateContent({
@@ -19,7 +24,7 @@ export class GeminiService {
         Analyze the telemetry. High 'Agitation' indicates running/panic. High 'Density' indicates crushing.
         Specific objects (luggage, backpacks) might indicate travelers or abandoned items.
         
-        Data: ${summary}
+        Data (Live Capture): ${summary}
         
         Return JSON with prediction, scenario description, countermeasures, and alerts.`,
         config: {
@@ -40,9 +45,14 @@ export class GeminiService {
         }
       });
 
+      console.log("Gemini Strategic Analysis Response Received:", response.text);
       return JSON.parse(response.text || "{}");
     } catch (error: any) {
-      console.error("Strategic Analysis Error:", error);
+      console.error("CRITICAL: Gemini Strategic Analysis Failed!");
+      console.error("Error Details:", error);
+      if (error.name === 'ApiError') {
+        console.error("API Status:", error.status);
+      }
       return this.getFallbackReasoning();
     }
   }
@@ -51,7 +61,7 @@ export class GeminiService {
   async chatWithCommander(history: ChatMessage[], currentMetrics: CrowdMetrics, query: string): Promise<string> {
     const ai = this.getClient();
     const context = `
-      Current Live Telemetry:
+      Current Live Telemetry (Timestamp: ${new Date().toLocaleTimeString()}):
       ${this.formatMetricsForAI(currentMetrics)}
       
       You are the AI Tactical Commander for this venue. Answer the operator's question briefly and professionally.
@@ -59,8 +69,9 @@ export class GeminiService {
     `;
 
     try {
+      console.log("Sending query to Tactical Commander:", query);
       const chat = ai.chats.create({
-        model: "gemini-3-flash-preview",
+        model: "gemini-1.5-flash",
         config: {
           systemInstruction: context
         },
@@ -71,15 +82,19 @@ export class GeminiService {
       });
 
       const result = await chat.sendMessage({ message: query });
+      console.log("Commander Response Received:", result.text);
       return result.text || "I cannot provide an answer at this time.";
     } catch (e) {
-      return "Commander Uplink Offline.";
+      console.error("CRITICAL: Tactical Commander Chat Failed!");
+      console.error("Error details:", e);
+      return "Commander Uplink Offline. (Check Browser Console for Error)";
     }
   }
 
   // Feature: Shift Report Generation
   async generateShiftReport(metricHistory: CrowdMetrics[]): Promise<string> {
     const ai = this.getClient();
+    console.log("Generating Shift Report for", metricHistory.length, "samples");
 
     // Sample history to avoid token limits
     const samples = metricHistory.filter((_, i) => i % 10 === 0);
@@ -102,17 +117,20 @@ export class GeminiService {
 
     try {
       const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
+        model: "gemini-1.5-flash",
         contents: prompt
       });
       return response.text || "Report generation failed.";
     } catch (e) {
+      console.error("CRITICAL: Shift Report Generation Failed!");
+      console.error("Error details:", e);
       return "Error generating report.";
     }
   }
 
   private formatMetricsForAI(metrics: CrowdMetrics): string {
     return `
+      [LIVE DATA SNAPSHOT at ${new Date().toISOString()}]
       - People Count: ${metrics.peopleCount}
       - Crowd Density: ${metrics.density.toFixed(2)} p/m2
       - Agitation Level: ${(metrics.agitationLevel * 100).toFixed(1)}%

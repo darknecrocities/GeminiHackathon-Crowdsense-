@@ -3,6 +3,7 @@ import React, { useRef, useEffect, useState, useImperativeHandle, forwardRef, us
 import { Detection, CrowdMetrics, RiskLevel } from '../types';
 import { geminiService } from '../services/geminiService';
 import { yoloService } from '../services/yoloService';
+import { audioService } from '../services/audioService';
 
 declare const Hls: any;
 
@@ -47,7 +48,7 @@ export const CameraFeed = forwardRef(({
     triggerManualScan: () => captureAndAnalyze()
   }));
 
-  // cleanup HLS and streams on unmount
+  // cleanup HLS, streams, and audio on unmount
   useEffect(() => {
     return () => {
       if (hlsRef.current) {
@@ -56,6 +57,7 @@ export const CameraFeed = forwardRef(({
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop());
       }
+      audioService.stop();
     };
   }, []);
 
@@ -103,6 +105,8 @@ export const CameraFeed = forwardRef(({
               videoRef.current?.play().then(() => {
                 setCameraReady(true);
                 setError(null);
+                // Start real audio capture from microphone
+                audioService.startFromMicrophone();
               }).catch(e => {
                 console.error("Play failed:", e);
                 setError("Camera play failed. Click anywhere on the page first (browser autoplay policy).");
@@ -129,6 +133,10 @@ export const CameraFeed = forwardRef(({
           videoRef.current.onloadeddata = () => {
             setCameraReady(true);
             videoRef.current?.play();
+            // Capture audio from video file
+            if (videoRef.current) {
+              audioService.startFromMediaElement(videoRef.current);
+            }
           };
         }
       }
@@ -366,9 +374,11 @@ export const CameraFeed = forwardRef(({
       panicIndex = (agitationLevel * 0.7) + (Math.min(density, 4) / 4 * 0.3);
     }
 
-    // Feature: Simulated Audio Proxy
-    // Noise is usually correlated with High Density + High Agitation
-    const audioLevel = Math.min(100, (density * 10) + (agitationLevel * 80));
+    // Feature: Live Audio Analysis via Web Audio API
+    // Falls back to simulated proxy if mic is not available
+    const audioLevel = audioService.active
+      ? audioService.getLevel()
+      : Math.min(100, (density * 10) + (agitationLevel * 80));
 
     const prob = density > 2.5 ? Math.min(0.95, density / 4) : density / 12;
     let calculatedRisk = geminiService.calcRisk(density, prob);
@@ -500,6 +510,11 @@ export const CameraFeed = forwardRef(({
             <div className="text-red-400 text-3xl mb-3">⚠️</div>
             <h4 className="text-red-400 font-bold text-sm uppercase mb-2">Connection Error</h4>
             <p className="text-slate-300 text-xs leading-relaxed">{error}</p>
+            {error.includes("HTTPS") && (
+              <p className="mt-2 text-[10px] text-slate-500 italic">
+                Tip: Access the app via http://localhost:3000 or enable HTTPS for network access.
+              </p>
+            )}
             <button
               onClick={() => { setError(null); window.location.reload(); }}
               className="mt-4 px-4 py-2 bg-red-500/20 border border-red-500/30 rounded-lg text-red-400 text-xs font-bold uppercase hover:bg-red-500/30 transition-all"
