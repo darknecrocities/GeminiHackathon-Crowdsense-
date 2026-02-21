@@ -6,6 +6,7 @@ import { yoloService } from '../services/yoloService';
 import { audioService } from '../services/audioService';
 
 declare const Hls: any;
+declare const JSMpeg: any;
 
 interface CameraFeedProps {
   onMetricsUpdate: (metrics: CrowdMetrics) => void;
@@ -14,6 +15,7 @@ interface CameraFeedProps {
   sourceUrl?: string | null;
   isLive: boolean;
   pollingInterval: number;
+  audioEnabled?: boolean;
 }
 
 // Restricted Zone Definition (Normalized Coordinates 0-1)
@@ -26,13 +28,16 @@ export const CameraFeed = forwardRef(({
   sourceType,
   sourceUrl,
   isLive,
-  pollingInterval
+  pollingInterval,
+  audioEnabled = false
 }: CameraFeedProps, ref) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const canvasPlayerRef = useRef<HTMLCanvasElement>(null); // Dedicated player canvas
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
   const hlsRef = useRef<any>(null);
+  const jsmpegRef = useRef<any>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
   // Tracking State for Agitation & Flow
@@ -40,7 +45,7 @@ export const CameraFeed = forwardRef(({
 
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [feedMode, setFeedMode] = useState<'video' | 'snapshot'>('video');
+  const [feedMode, setFeedMode] = useState<'video' | 'snapshot' | 'stream-ws'>('video');
   const [snapshotTrigger, setSnapshotTrigger] = useState(0);
   const [cameraReady, setCameraReady] = useState(false);
 
@@ -53,6 +58,9 @@ export const CameraFeed = forwardRef(({
     return () => {
       if (hlsRef.current) {
         hlsRef.current.destroy();
+      }
+      if (jsmpegRef.current) {
+        jsmpegRef.current.destroy();
       }
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop());
@@ -80,6 +88,10 @@ export const CameraFeed = forwardRef(({
     if (hlsRef.current) {
       hlsRef.current.destroy();
       hlsRef.current = null;
+    }
+    if (jsmpegRef.current) {
+      jsmpegRef.current.destroy();
+      jsmpegRef.current = null;
     }
 
     const initCamera = async () => {
@@ -141,9 +153,18 @@ export const CameraFeed = forwardRef(({
         }
       }
       else if (sourceType === 'ipcam' && sourceUrl) {
+        // Transparent RTSP Support for IP Webcam App
+        // If the user provides an RTSP link from "IP Webcam", we transparently
+        // load the MJPEG stream from the same IP/Port, which browsers support.
         if (sourceUrl.startsWith('rtsp')) {
-          setError("RTSP streams are not supported in the browser. Use an HTTP/MJPEG/HLS stream instead.");
-          return;
+          const match = sourceUrl.match(/rtsp:\/\/([\d.]+):(\d+)/);
+          if (match) {
+            // We don't set an error. We just proceed. 
+            // The <img> tag below will handle the display using a constructed HTTP URL.
+          } else {
+            setError("Invalid RTSP URL format.");
+            return;
+          }
         }
         // MJPEG snapshot mode
         if (sourceUrl.includes('.jpg') || sourceUrl.includes('snapshot') || sourceUrl.includes('mjpg')) {
@@ -164,7 +185,11 @@ export const CameraFeed = forwardRef(({
               hlsRef.current = hls;
               hls.on(Hls.Events.MANIFEST_PARSED, () => {
                 setCameraReady(true);
-                videoRef.current?.play().catch(e => console.error("Autoplay blocked", e));
+                videoRef.current?.play().then(() => {
+                  if (audioEnabled && videoRef.current) {
+                    audioService.startFromMediaElement(videoRef.current);
+                  }
+                }).catch(e => console.error("Autoplay blocked", e));
               });
               hls.on(Hls.Events.ERROR, (_event: any, data: any) => {
                 if (data.fatal) {
@@ -185,6 +210,32 @@ export const CameraFeed = forwardRef(({
             setError("Failed to initialize HLS stream.");
           }
         }
+        // JSMpeg / WebSocket Bridge (Low Latency RTSP)
+        else if (sourceUrl.startsWith('ws://')) {
+          if (typeof JSMpeg !== 'undefined' && canvasPlayerRef.current) {
+            setFeedMode('stream-ws');
+            // Force 2D canvas execution context to avoid "Failed to get WebGL Context"
+            // and ensure we can easily read the canvas data for YOLO inference
+            try {
+              jsmpegRef.current = new JSMpeg.Player(sourceUrl, {
+                canvas: canvasPlayerRef.current,
+                autoplay: true,
+                audio: audioEnabled,
+                disableGl: true, // Crucial for compatibility
+                videoBufferSize: 1024 * 1024, // Increase buffer slightly
+                onPlay: () => {
+                  setCameraReady(true);
+                  setError(null);
+                }
+              });
+            } catch (e) {
+              console.error("JSMpeg Init Failed:", e);
+              setError("Failed to initialize RTSP Player. Check if proxy is running.");
+            }
+          } else {
+            setError("JSMpeg library not loaded.");
+          }
+        }
         // Direct video stream (MJPEG over HTTP, etc.)
         else {
           if (videoRef.current) {
@@ -198,7 +249,11 @@ export const CameraFeed = forwardRef(({
               setFeedMode('snapshot');
               setCameraReady(true);
             };
-            videoRef.current.play().catch(_e => {
+            videoRef.current.play().then(() => {
+              if (audioEnabled && videoRef.current) {
+                audioService.startFromMediaElement(videoRef.current);
+              }
+            }).catch(_e => {
               // If direct play fails, try snapshot mode
               setFeedMode('snapshot');
               setCameraReady(true);
@@ -215,6 +270,17 @@ export const CameraFeed = forwardRef(({
     }
 
   }, [sourceType, sourceUrl]);
+
+  // Handle dynamic audio toggle while stream is running
+  useEffect(() => {
+    if (cameraReady && feedMode === 'video' && videoRef.current) {
+      if (audioEnabled) {
+        audioService.startFromMediaElement(videoRef.current);
+      } else {
+        audioService.stop();
+      }
+    }
+  }, [audioEnabled, cameraReady, feedMode]);
 
   const captureAndAnalyze = useCallback(async () => {
     if (isProcessing || !canvasRef.current || !overlayCanvasRef.current) return;
@@ -241,15 +307,23 @@ export const CameraFeed = forwardRef(({
         canvas.width = sourceWidth;
         canvas.height = sourceHeight;
         ctx.drawImage(video, 0, 0, sourceWidth, sourceHeight);
-      } else if (feedMode === 'snapshot' && imgRef.current) {
-        const img = imgRef.current;
-        if (!img.complete || img.naturalWidth === 0) { setIsProcessing(false); return; }
-        sourceWidth = img.naturalWidth;
-        sourceHeight = img.naturalHeight;
-        canvas.width = sourceWidth;
-        canvas.height = sourceHeight;
-        ctx.drawImage(img, 0, 0, sourceWidth, sourceHeight);
-        if (isLive) setSnapshotTrigger(prev => prev + 1);
+      } else if (feedMode === 'snapshot' && (imgRef.current || jsmpegRef.current)) {
+        // For JSMpeg, the canvas is already being drawn to by the library.
+        // We just need to trigger inference on that same canvas.
+        if (imgRef.current) {
+          const img = imgRef.current;
+          if (!img.complete || img.naturalWidth === 0) { setIsProcessing(false); return; }
+          sourceWidth = img.naturalWidth;
+          sourceHeight = img.naturalHeight;
+          canvas.width = sourceWidth;
+          canvas.height = sourceHeight;
+          ctx.drawImage(img, 0, 0, sourceWidth, sourceHeight);
+          if (isLive) setSnapshotTrigger(prev => prev + 1);
+        } else {
+          // JSMpeg Case: Use existing canvas data
+          sourceWidth = canvas.width;
+          sourceHeight = canvas.height;
+        }
       } else {
         setIsProcessing(false);
         return;
@@ -482,14 +556,31 @@ export const CameraFeed = forwardRef(({
           ref={videoRef}
           autoPlay
           playsInline
-          muted
+          muted={!audioEnabled}
           loop={sourceType === 'file'}
           className="w-full h-full object-contain"
         />
       )}
-      {sourceType !== 'simulation' && feedMode === 'snapshot' && sourceUrl && (
-        <img ref={imgRef} src={`${sourceUrl}${sourceUrl.includes('?') ? '&' : '?'}t=${snapshotTrigger}`} className="w-full h-full object-contain" crossOrigin="anonymous" />
+      {sourceType !== 'simulation' && feedMode === 'snapshot' && sourceUrl && !sourceUrl.startsWith('ws') && (
+        <img
+          ref={imgRef}
+          src={
+            sourceUrl.startsWith('rtsp')
+              ? sourceUrl.replace('rtsp://', 'http://').replace(/\/.*$/, '/video') // Magic RTSP->MJPEG conversion
+              : `${sourceUrl}${sourceUrl.includes('?') ? '&' : '?'}t=${snapshotTrigger}`
+          }
+          className="w-full h-full object-contain"
+          crossOrigin="anonymous"
+          onError={() => setError("Camera Unreachable. Check IP/Wi-Fi connection.")}
+        />
       )}
+
+      {/* Dedicated JSMpeg Canvas */}
+      <canvas
+        ref={canvasPlayerRef}
+        className={`w-full h-full object-contain ${feedMode === 'stream-ws' ? 'block' : 'hidden'}`}
+      />
+
       {sourceType === 'simulation' && (
         <div className="w-full h-full flex flex-col items-center justify-center bg-slate-900 relative overflow-hidden">
           <div className="absolute inset-0 opacity-20 bg-[radial-gradient(#22d3ee_1px,transparent_1px)] [background-size:20px_20px]"></div>
@@ -510,16 +601,33 @@ export const CameraFeed = forwardRef(({
             <div className="text-red-400 text-3xl mb-3">⚠️</div>
             <h4 className="text-red-400 font-bold text-sm uppercase mb-2">Connection Error</h4>
             <p className="text-slate-300 text-xs leading-relaxed">{error}</p>
-            {error.includes("HTTPS") && (
-              <p className="mt-2 text-[10px] text-slate-500 italic">
-                Tip: Access the app via http://localhost:3000 or enable HTTPS for network access.
-              </p>
-            )}
+
+            <div className="mt-4 flex flex-col gap-2">
+              <a
+                href={sourceUrl || '#'}
+                target="_blank"
+                rel="noreferrer"
+                className="text-[10px] text-cyan-400 underline hover:text-cyan-300"
+              >
+                Verify URL: Open stream in new tab
+              </a>
+
+              <div className="p-3 bg-red-950/20 rounded-lg border border-red-500/10 text-left">
+                <h5 className="text-[9px] font-bold text-red-300 uppercase mb-1">Potential Fixes:</h5>
+                <ul className="text-[9px] text-slate-400 space-y-1 list-disc ml-3 leading-tight">
+                  <li>Ensure your phone and PC are on the <b>SAME Wi-Fi</b></li>
+                  <li>Check if the URL works in a <b>VLC Player</b> first</li>
+                  <li>Disable <b>HTTPS</b> (Browsers block local HTTP cams on HTTPS sites)</li>
+                  <li>Install a "CORS Unblock" browser extension if you see "Tainted Canvas"</li>
+                </ul>
+              </div>
+            </div>
+
             <button
               onClick={() => { setError(null); window.location.reload(); }}
-              className="mt-4 px-4 py-2 bg-red-500/20 border border-red-500/30 rounded-lg text-red-400 text-xs font-bold uppercase hover:bg-red-500/30 transition-all"
+              className="mt-4 w-full py-2 bg-red-500/20 border border-red-500/30 rounded-lg text-red-400 text-xs font-bold uppercase hover:bg-red-500/30 transition-all"
             >
-              Retry
+              Retry Connection
             </button>
           </div>
         </div>

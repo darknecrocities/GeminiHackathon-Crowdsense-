@@ -17,13 +17,13 @@ const App: React.FC = () => {
   const [showSplash, setShowSplash] = useState(true); // Splash State
   const [activeTab, setActiveTab] = useState('dashboard');
   const [metrics, setMetrics] = useState<CrowdMetrics>({
-    peopleCount: 0, 
-    density: 0, 
-    flowRate: 0, 
+    peopleCount: 0,
+    density: 0,
+    flowRate: 0,
     counterFlowCount: 0,
-    avgVelocity: 0, 
-    congestionZoneCount: 0, 
-    stampedeProbability: 0, 
+    avgVelocity: 0,
+    congestionZoneCount: 0,
+    stampedeProbability: 0,
     riskLevel: RiskLevel.LOW,
     agitationLevel: 0,
     panicIndex: 0,
@@ -37,12 +37,20 @@ const App: React.FC = () => {
   const [detections, setDetections] = useState<Detection[]>([]);
   const [isLive, setIsLive] = useState(true);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  
+
   // Input Source State
   const [sourceType, setSourceType] = useState<'webcam' | 'file' | 'ipcam' | 'simulation'>('webcam');
   const [sourceUrl, setSourceUrl] = useState<string | null>(null);
   const [ipInput, setIpInput] = useState('');
+  const [audioEnabled, setAudioEnabled] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const sampleLinks = [
+    { name: '🚀 RTSP Bridge (Low Latency)', url: 'ws://localhost:9999' },
+    { name: 'H264 + Audio (HLS)', url: `http://${ipInput.split(':')[0] || '10.14.62.176'}:8080/video/stream.m3u8` },
+    { name: 'Android Hotspot (Try)', url: 'http://192.168.43.1:8080/video/stream.m3u8' },
+    { name: 'MJPEG (No Audio)', url: `http://${ipInput.split(':')[0] || '10.14.62.176'}:8080/video` },
+  ];
 
   useEffect(() => {
     if (metrics.peopleCount > 0 || isLive) {
@@ -85,7 +93,17 @@ const App: React.FC = () => {
 
   const handleIpSubmit = () => {
     if (!ipInput) return;
-    setSourceUrl(ipInput);
+
+    let targetUrl = ipInput.trim();
+
+    // Compatibility Mode: We allow RTSP links but the CameraFeed will handle 
+    // the failover to the HTTP port of the camera
+    if (targetUrl.startsWith('rtsp://')) {
+      // Just pass it through, CameraFeed.tsx will handle the protocol swap for display
+      console.log("Passing RTSP link to camera feed for native compatibility mode");
+    }
+
+    setSourceUrl(targetUrl);
   };
 
   // Render Splash Screen if active
@@ -102,17 +120,18 @@ const App: React.FC = () => {
           <div className="flex-1 grid grid-cols-12 gap-6 min-h-0">
             <div className="col-span-12 lg:col-span-8 flex flex-col gap-6 h-full min-h-0">
               <div className="flex-1 min-h-0 relative">
-                <CameraFeed 
-                  onMetricsUpdate={setMetrics} 
+                <CameraFeed
+                  onMetricsUpdate={setMetrics}
                   onDetectionsUpdate={setDetections}
                   sourceType={sourceType}
                   sourceUrl={sourceUrl}
                   isLive={isLive}
-                  pollingInterval={150} 
+                  pollingInterval={150}
+                  audioEnabled={audioEnabled}
                 />
               </div>
               <div className="h-1/3">
-                 <AnalyticsPanel history={history} />
+                <AnalyticsPanel history={history} />
               </div>
             </div>
             <div className="col-span-12 lg:col-span-4 flex flex-col gap-6 h-full overflow-y-auto no-scrollbar pb-10">
@@ -127,13 +146,14 @@ const App: React.FC = () => {
         return (
           <div className="flex-1 flex flex-col gap-6">
             <div className="flex-1 glass rounded-3xl overflow-hidden border border-white/10 relative">
-              <CameraFeed 
-                onMetricsUpdate={setMetrics} 
+              <CameraFeed
+                onMetricsUpdate={setMetrics}
                 onDetectionsUpdate={setDetections}
                 sourceType={sourceType}
                 sourceUrl={sourceUrl}
                 isLive={isLive}
-                pollingInterval={100} 
+                pollingInterval={100}
+                audioEnabled={audioEnabled}
               />
             </div>
           </div>
@@ -142,8 +162,8 @@ const App: React.FC = () => {
         return (
           <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-6 overflow-y-auto no-scrollbar">
             <div className="space-y-6">
-                <RiskPanel metrics={metrics} reasoning={reasoning} onTriggerReasoning={handleManualReasoning} isAnalyzing={isAnalyzing} />
-                <ChatInterface metrics={metrics} />
+              <RiskPanel metrics={metrics} reasoning={reasoning} onTriggerReasoning={handleManualReasoning} isAnalyzing={isAnalyzing} />
+              <ChatInterface metrics={metrics} />
             </div>
             <div className="glass p-8 rounded-3xl">
               <h3 className="text-xl font-bold mb-6 italic text-cyan-400">Response Protocols</h3>
@@ -157,20 +177,20 @@ const App: React.FC = () => {
         return (
           <div className="flex-1 glass p-8 rounded-3xl overflow-y-auto">
             <div className="flex justify-between items-center mb-8">
-               <h3 className="text-2xl font-black italic">Full Intelligence Archive</h3>
-               <button onClick={handleGenerateReport} className="px-4 py-2 bg-slate-800 border border-white/10 rounded-lg text-xs font-bold uppercase hover:bg-slate-700 transition-all flex items-center gap-2">
-                 <span>📄</span> Generate Shift Report
-               </button>
+              <h3 className="text-2xl font-black italic">Full Intelligence Archive</h3>
+              <button onClick={handleGenerateReport} className="px-4 py-2 bg-slate-800 border border-white/10 rounded-lg text-xs font-bold uppercase hover:bg-slate-700 transition-all flex items-center gap-2">
+                <span>📄</span> Generate Shift Report
+              </button>
             </div>
             <div className="h-[500px] mb-8"><AnalyticsPanel history={history} /></div>
             <div className="grid grid-cols-3 gap-6">
-               {history.slice(-3).map((h, i) => (
-                 <div key={i} className="p-4 bg-white/5 rounded-2xl border border-white/5">
-                   <div className="text-[10px] text-slate-500 uppercase">Snapshot t-{i}</div>
-                   <div className="text-xl font-bold font-mono">{h.peopleCount} People</div>
-                   <div className="text-xs text-cyan-500">{h.riskLevel} Risk</div>
-                 </div>
-               ))}
+              {history.slice(-3).map((h, i) => (
+                <div key={i} className="p-4 bg-white/5 rounded-2xl border border-white/5">
+                  <div className="text-[10px] text-slate-500 uppercase">Snapshot t-{i}</div>
+                  <div className="text-xl font-bold font-mono">{h.peopleCount} People</div>
+                  <div className="text-xs text-cyan-500">{h.riskLevel} Risk</div>
+                </div>
+              ))}
             </div>
           </div>
         );
@@ -180,7 +200,7 @@ const App: React.FC = () => {
             <div className="w-24 h-24 bg-cyan-500/20 rounded-full flex items-center justify-center text-4xl mb-6 animate-pulse">🧪</div>
             <h2 className="text-3xl font-black italic mb-4">Synthetic Scenario Engine</h2>
             <p className="max-w-md text-slate-400 mb-8">Stress test your crowd protocols using GPU-accelerated synthetic distributions.</p>
-            <button 
+            <button
               onClick={() => { setSourceType('simulation'); setActiveTab('dashboard'); }}
               className="px-8 py-3 bg-cyan-500 text-slate-950 font-bold rounded-xl uppercase tracking-widest hover:bg-cyan-400 transition-all"
             >
@@ -196,7 +216,7 @@ const App: React.FC = () => {
   return (
     <Layout>
       <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} />
-      
+
       <div className="flex-1 p-6 flex flex-col gap-6 overflow-hidden relative">
         {/* Unified Control Header */}
         <div className="flex flex-col gap-4">
@@ -206,22 +226,22 @@ const App: React.FC = () => {
                 <span className="w-2 h-6 bg-cyan-500 rounded-full shadow-[0_0_15px_rgba(34,211,238,0.4)]"></span>
                 {activeTab.toUpperCase()}
               </h2>
-              
+
               {/* Source Selection */}
               <div className="flex bg-slate-900 border border-white/5 rounded-xl p-1 gap-1">
-                <button 
+                <button
                   onClick={() => setSourceType('webcam')}
                   className={`px-3 py-1 rounded-lg text-[9px] font-bold uppercase transition-all ${sourceType === 'webcam' ? 'bg-cyan-500 text-slate-950 shadow-lg shadow-cyan-500/20' : 'text-slate-500 hover:text-slate-300'}`}
                 >
                   Cam
                 </button>
-                <button 
+                <button
                   onClick={() => fileInputRef.current?.click()}
                   className={`px-3 py-1 rounded-lg text-[9px] font-bold uppercase transition-all ${sourceType === 'file' ? 'bg-cyan-500 text-slate-950 shadow-lg shadow-cyan-500/20' : 'text-slate-500 hover:text-slate-300'}`}
                 >
                   Upload
                 </button>
-                <button 
+                <button
                   onClick={() => setSourceType('ipcam')}
                   className={`px-3 py-1 rounded-lg text-[9px] font-bold uppercase transition-all ${sourceType === 'ipcam' ? 'bg-cyan-500 text-slate-950 shadow-lg shadow-cyan-500/20' : 'text-slate-500 hover:text-slate-300'}`}
                 >
@@ -232,15 +252,14 @@ const App: React.FC = () => {
             </div>
 
             <div className="flex items-center gap-3">
-               <div className="glass px-3 py-1.5 rounded-xl border border-white/5 flex items-center gap-3">
-                 <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_#10b981]"></div>
-                 <span className="text-[10px] font-mono text-slate-400 uppercase tracking-widest">Analytics Online</span>
-               </div>
-               <button 
+              <div className="glass px-3 py-1.5 rounded-xl border border-white/5 flex items-center gap-3">
+                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_#10b981]"></div>
+                <span className="text-[10px] font-mono text-slate-400 uppercase tracking-widest">Analytics Online</span>
+              </div>
+              <button
                 onClick={() => setIsLive(!isLive)}
-                className={`px-4 py-2 rounded-xl text-[10px] font-bold uppercase border transition-all ${
-                  isLive ? 'border-red-500/50 text-red-500 bg-red-500/5' : 'border-slate-500 text-slate-500'
-                }`}
+                className={`px-4 py-2 rounded-xl text-[10px] font-bold uppercase border transition-all ${isLive ? 'border-red-500/50 text-red-500 bg-red-500/5' : 'border-slate-500 text-slate-500'
+                  }`}
               >
                 {isLive ? '● Live Stream' : 'Stream Paused'}
               </button>
@@ -249,22 +268,44 @@ const App: React.FC = () => {
 
           {/* Dedicated IP Input Bar */}
           {sourceType === 'ipcam' && (
-            <div className="flex items-center gap-2 p-2 bg-slate-900/50 border border-white/10 rounded-xl animate-in slide-in-from-top-2">
-              <span className="text-xs ml-2 text-slate-400">🌐</span>
-              <input 
-                type="text" 
-                value={ipInput}
-                onChange={(e) => setIpInput(e.target.value)}
-                placeholder="Paste URL (e.g. http://192.168.1.5:8080/video)"
-                className="flex-1 bg-transparent border-none text-xs font-mono text-cyan-400 placeholder-slate-600 focus:ring-0 outline-none"
-                onKeyDown={(e) => e.key === 'Enter' && handleIpSubmit()}
-              />
-              <button 
-                onClick={handleIpSubmit}
-                className="px-4 py-1.5 bg-cyan-500/10 text-cyan-400 text-[10px] font-bold uppercase rounded-lg hover:bg-cyan-500/20 transition-all"
-              >
-                Connect
-              </button>
+            <div className="flex flex-col gap-3 p-3 bg-slate-900/50 border border-white/10 rounded-2xl animate-in slide-in-from-top-2">
+              <div className="flex items-center gap-2">
+                <span className="text-xs ml-2 text-slate-400">🌐</span>
+                <input
+                  type="text"
+                  value={ipInput}
+                  onChange={(e) => setIpInput(e.target.value)}
+                  placeholder="Paste URL (e.g. http://192.168.1.5:8080/video)"
+                  className="flex-1 bg-transparent border-none text-xs font-mono text-cyan-400 placeholder-slate-600 focus:ring-0 outline-none"
+                  onKeyDown={(e) => e.key === 'Enter' && handleIpSubmit()}
+                />
+                <button
+                  onClick={() => setAudioEnabled(!audioEnabled)}
+                  className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase transition-all ${audioEnabled ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'bg-slate-800 text-slate-500 border border-white/5'}`}
+                  title="Enable Audio Analysis from Stream"
+                >
+                  {audioEnabled ? '🔊 Audio ON' : '🔇 Audio OFF'}
+                </button>
+                <button
+                  onClick={handleIpSubmit}
+                  className="px-4 py-1.5 bg-cyan-500 text-slate-950 text-[10px] font-bold uppercase rounded-lg hover:bg-cyan-400 transition-all"
+                >
+                  Connect
+                </button>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 px-2 pb-1">
+                <span className="text-[9px] text-slate-600 font-bold uppercase tracking-tight">Suggestions:</span>
+                {sampleLinks.map((link, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => { setIpInput(link.url); setSourceUrl(link.url); }}
+                    className="px-2 py-0.5 bg-white/5 hover:bg-white/10 border border-white/5 rounded text-[8px] font-mono text-slate-400 transition-all"
+                  >
+                    {link.name}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
         </div>
@@ -273,14 +314,14 @@ const App: React.FC = () => {
 
         {!isCameraVisible && (
           <div className="absolute opacity-0 pointer-events-none w-1 h-1 overflow-hidden">
-             <CameraFeed 
-                onMetricsUpdate={setMetrics} 
-                onDetectionsUpdate={setDetections}
-                sourceType={sourceType}
-                sourceUrl={sourceUrl}
-                isLive={isLive}
-                pollingInterval={200}
-             />
+            <CameraFeed
+              onMetricsUpdate={setMetrics}
+              onDetectionsUpdate={setDetections}
+              sourceType={sourceType}
+              sourceUrl={sourceUrl}
+              isLive={isLive}
+              pollingInterval={200}
+            />
           </div>
         )}
       </div>

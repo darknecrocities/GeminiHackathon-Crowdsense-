@@ -26,6 +26,7 @@ export class GeminiService {
         
         Data (Live Capture): ${summary}
         
+        
         Return JSON with prediction, scenario description, countermeasures, and alerts.`,
         config: {
           responseMimeType: "application/json",
