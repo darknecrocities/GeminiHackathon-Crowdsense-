@@ -156,7 +156,7 @@ CrowdSense™ implements a **Hybrid Edge–Cloud Intelligence Architecture** com
 ### 3.2 Edge-Based Object Detection
 The system uses **EfficientDet-Lite0**, deployed via MediaPipe Tasks Vision in WebAssembly.
 - **Model Logic:** Uses a Bi-directional Feature Pyramid Network (BiFPN) and compound scaling to balance accuracy and latency.
-- **Performance:** Optimized for browser-level inference at ~20 FPS.
+- **Performance:** Optimized for browser-level inference at ~90 FPS.
 - **Output ($D$):** For each frame, it identifies $D = \{(b_i, c_i, s_i)\}$ where $b$ is the box, $c$ the class, and $s$ the confidence score.
 
 ### 3.3 Multi-Object Tracking: ByteTrack-lite
