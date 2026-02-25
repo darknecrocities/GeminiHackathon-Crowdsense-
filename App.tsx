@@ -13,6 +13,7 @@ import { SplashScreen } from './components/SplashScreen'; // Import Splash
 import { CrowdMetrics, Detection, AIReasoning, RiskLevel } from './types';
 import { geminiService } from './services/geminiService';
 
+
 const App: React.FC = () => {
   const [showSplash, setShowSplash] = useState(true); // Splash State
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -95,7 +96,6 @@ const App: React.FC = () => {
     if (!ipInput) return;
 
     let targetUrl = ipInput.trim();
-
     // Compatibility Mode: We allow RTSP links but the CameraFeed will handle 
     // the failover to the HTTP port of the camera
     if (targetUrl.startsWith('rtsp://')) {
@@ -126,7 +126,7 @@ const App: React.FC = () => {
                   sourceType={sourceType}
                   sourceUrl={sourceUrl}
                   isLive={isLive}
-                  pollingInterval={150}
+                  pollingInterval={50}
                   audioEnabled={audioEnabled}
                 />
               </div>
@@ -152,7 +152,7 @@ const App: React.FC = () => {
                 sourceType={sourceType}
                 sourceUrl={sourceUrl}
                 isLive={isLive}
-                pollingInterval={100}
+                pollingInterval={50}
                 audioEnabled={audioEnabled}
               />
             </div>
@@ -320,7 +320,7 @@ const App: React.FC = () => {
               sourceType={sourceType}
               sourceUrl={sourceUrl}
               isLive={isLive}
-              pollingInterval={200}
+              pollingInterval={100}
             />
           </div>
         )}

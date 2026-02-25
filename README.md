@@ -17,8 +17,8 @@ Managing large crowds at stadiums, transport hubs, and public events is traditio
 
 ## 💡 The Solution: Hybrid Intelligence
 **CrowdSense™** solves this by splitting the workload:
-1.  **The Eyes (Edge AI):** A local YOLO model runs directly in the browser via WebAssembly to detect people and calculate density metrics in real-time. **No video leaves the device.**
-2.  **The Brain (Gemini 3.0):** Only anonymized mathematical metadata (flow rates, density vectors) is sent to **Gemini 3.0 Flash**. The AI acts as a "Strategic Commander," predicting stampede risks and generating tactical protocols.
+1.  **The Eyes (Edge AI):** A specialized **MediaPipe Tasks Vision** engine (using **EfficientDet-Lite0**) runs directly in the browser via WebAssembly to detect people and calculate density metrics in real-time. **No video leaves the device.**
+2.  **The Brain (Gemini 3.0):** Only anonymized mathematical metadata (flow rates, density vectors, persistent track IDs) is sent to **Gemini 3.0 Flash**. The AI acts as a "Strategic Commander," predicting stampede risks and generating tactical protocols.
 
 ---
 
@@ -46,8 +46,9 @@ Managing large crowds at stadiums, transport hubs, and public events is traditio
 
 ### Artificial Intelligence
 - **Reasoning Engine:** Google Gemini API (`gemini-3-flash-preview`)
-- **Computer Vision:** YOLOv8 (ONNX Format)
-- **Runtime:** ONNX Runtime Web (WebGL Execution Provider)
+- **Computer Vision:** MediaPipe Tasks Vision (EfficientDet-Lite0)
+- **Tracking:** ByteTrack-lite + EMA Smoothing Algorithm
+- **Runtime:** MediaPipe Web (WASM + GPU Delegate)
 
 ### Frontend & Visualization
 - **Framework:** React 19 + TypeScript + Vite
@@ -64,8 +65,8 @@ Managing large crowds at stadiums, transport hubs, and public events is traditio
 graph TD
     subgraph "Client Side (Browser Engine)"
         A[Video Source: Webcam/File/URL] --> B[CameraFeed Component]
-        B --> C[YoloService: ONNX Runtime]
-        C -- "Raw Detections" --> D[Metrics Engine]
+        B --> C[MediaPipeService & TrackingService]
+        C -- "Persistent Tracks" --> D[Metrics Engine]
         D -- "CrowdMetrics Telemetry" --> E[App State]
         E --> F[UI Components: Dashboards/Maps]
     end
@@ -131,8 +132,8 @@ erDiagram
 ## 🚀 How It Works
 
 1.  **Ingestion:** Video is captured via Webcam, File Upload, or IP Camera Stream (HTTP/MJPEG).
-2.  **Detection:** The browser extracts frames and passes them to the local ONNX model.
-3.  **Metrics Calculation:** The app calculates `People Count`, `Density (p/m²)`, and `Flow Velocity`.
+2.  **Detection & Tracking:** The browser extracts frames and passes them to the local **MediaPipe Object Detector** (EfficientDet-Lite0). Detections are then processed by the **ByteTrack** algorithm with **EMA Smoothing** to maintain persistent IDs.
+3.  **Metrics Calculation:** The app calculates `People Count`, `Density (p/m²)`, and `Flow Velocity` (derived from track history).
 4.  **Reasoning Loop:**
     - Every few seconds (or on trigger), metadata is JSON-serialized.
     - **Gemini 3.0** analyzes the metadata against safety heuristics.

@@ -2,7 +2,8 @@
 import React, { useRef, useEffect, useState, useImperativeHandle, forwardRef, useCallback } from 'react';
 import { Detection, CrowdMetrics, RiskLevel } from '../types';
 import { geminiService } from '../services/geminiService';
-import { yoloService } from '../services/yoloService';
+import { mediaPipeService } from '../services/mediaPipeService';
+import { trackingService, Track } from '../services/trackingService';
 import { audioService } from '../services/audioService';
 
 declare const Hls: any;
@@ -329,10 +330,12 @@ export const CameraFeed = forwardRef(({
         return;
       }
 
-      const detections = await yoloService.runInference(canvas);
-      onDetectionsUpdate(detections);
-      updateMetricsLocally(detections, sourceWidth, sourceHeight);
-      drawOverlays(detections, sourceWidth, sourceHeight);
+      const detections = await mediaPipeService.runInference(canvas);
+      const trackedDetections = trackingService.update(detections);
+
+      onDetectionsUpdate(trackedDetections);
+      updateMetricsLocally(trackedDetections, sourceWidth, sourceHeight);
+      drawOverlays(trackedDetections, sourceWidth, sourceHeight);
 
       if (detections.length >= 0) setError(null);
 
@@ -485,21 +488,41 @@ export const CameraFeed = forwardRef(({
     if (!ctx) return;
 
     const container = canvas.parentElement;
-    canvas.width = container?.clientWidth || 640;
-    canvas.height = container?.clientHeight || 480;
-
-    const scaleX = canvas.width / 1000;
-    const scaleY = canvas.height / 1000;
+    const containerW = container?.clientWidth || 640;
+    const containerH = container?.clientHeight || 480;
+    canvas.width = containerW;
+    canvas.height = containerH;
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // Draw Restricted Zone
-    const zw = RESTRICTED_ZONE.w * canvas.width;
-    const zh = RESTRICTED_ZONE.h * canvas.height;
-    const zx = RESTRICTED_ZONE.x * canvas.width;
-    const zy = RESTRICTED_ZONE.y * canvas.height;
+    // Calculate aspect ratio fit (object-contain behavior)
+    const videoAspect = videoW / videoH;
+    const containerAspect = containerW / containerH;
 
-    // Zone Pattern
+    let displayedW, displayedH;
+    let offsetX = 0, offsetY = 0;
+
+    if (containerAspect > videoAspect) {
+      // Pillarboxed (bars on left/right)
+      displayedH = containerH;
+      displayedW = containerH * videoAspect;
+      offsetX = (containerW - displayedW) / 2;
+    } else {
+      // Letterboxed (bars on top/bottom)
+      displayedW = containerW;
+      displayedH = containerW / videoAspect;
+      offsetY = (containerH - displayedH) / 2;
+    }
+
+    const scaleX = displayedW / 1000;
+    const scaleY = displayedH / 1000;
+
+    // Draw Restricted Zone (scaled to visible area)
+    const zw = RESTRICTED_ZONE.w * displayedW;
+    const zh = RESTRICTED_ZONE.h * displayedH;
+    const zx = offsetX + (RESTRICTED_ZONE.x * displayedW);
+    const zy = offsetY + (RESTRICTED_ZONE.y * displayedH);
+
     ctx.fillStyle = 'rgba(239, 68, 68, 0.1)';
     ctx.strokeStyle = '#ef4444';
     ctx.lineWidth = 2;
@@ -512,10 +535,11 @@ export const CameraFeed = forwardRef(({
     ctx.setLineDash([]);
 
     // Draw Detections
-    detections.forEach((det) => {
+    detections.forEach((det: any) => {
       const [ymin, xmin, ymax, xmax] = det.box_2d;
-      const x = xmin * scaleX;
-      const y = ymin * scaleY;
+
+      const x = offsetX + xmin * scaleX;
+      const y = offsetY + ymin * scaleY;
       const w = (xmax - xmin) * scaleX;
       const h = (ymax - ymin) * scaleY;
 
@@ -528,12 +552,15 @@ export const CameraFeed = forwardRef(({
       ctx.lineWidth = 2;
       ctx.strokeRect(x, y, w, h);
 
+      // Unique ID HUD
+      const idLabel = det.id ? `ID:${det.id.split('-').pop()}` : '';
+
       ctx.fillStyle = color;
       ctx.globalAlpha = 1;
-      ctx.font = '10px monospace';
-      ctx.fillText(`${det.label} ${(det.confidence || 0).toFixed(2)}`, x, y - 5);
+      ctx.font = 'bold 10px monospace';
+      ctx.fillText(`${det.label} ${idLabel} ${(det.confidence || 0).toFixed(2)}`, x, y - 5);
 
-      ctx.fillStyle = color + '20'; // Hex to rgba approx
+      ctx.fillStyle = color + '20';
       ctx.fillRect(x, y, w, h);
     });
   };

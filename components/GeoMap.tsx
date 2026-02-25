@@ -8,10 +8,10 @@ interface GeoMapProps {
 }
 
 export const GeoMap: React.FC<GeoMapProps> = ({ metrics, detections }) => {
-  // Normalize coordinates (assuming YOLO output 0-1000) to percentage 0-100%
+  // Normalize coordinates (assuming MobileNet output 0-1000) to percentage 0-100%
   const heatPoints = useMemo(() => {
     return detections.map(d => ({
-      // In YOLO coords: [ymin, xmin, ymax, xmax]
+      // In MobileNet SSD coords: [ymin, xmin, ymax, xmax]
       // xmin is index 1. 0-1000 scale.
       x: d.box_2d[1] / 10,
       y: d.box_2d[0] / 10,
@@ -26,7 +26,7 @@ export const GeoMap: React.FC<GeoMapProps> = ({ metrics, detections }) => {
         <svg width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
           <defs>
             <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
-              <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#22d3ee" strokeWidth="0.5"/>
+              <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#22d3ee" strokeWidth="0.5" />
               <rect width="2" height="2" fill="#22d3ee" x="0" y="0" />
             </pattern>
           </defs>
@@ -39,7 +39,7 @@ export const GeoMap: React.FC<GeoMapProps> = ({ metrics, detections }) => {
         <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Sector Alpha</h4>
         <div className="text-xl font-bold font-mono text-white">ACTIVE MONITORING</div>
       </div>
-      
+
       <div className="absolute top-8 right-8 p-4 glass rounded-xl border-l-4 border-red-500 backdrop-blur-md">
         <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Density Alert</h4>
         <div className={`text-xl font-bold font-mono ${metrics.density > 2 ? 'text-red-500 animate-pulse' : 'text-emerald-400'}`}>
@@ -50,12 +50,11 @@ export const GeoMap: React.FC<GeoMapProps> = ({ metrics, detections }) => {
       {/* Dynamic Heatmap Core */}
       <div className="absolute inset-0 z-10">
         {heatPoints.map((p) => (
-          <div 
+          <div
             key={p.id}
-            className={`absolute rounded-full blur-xl transition-all duration-500 pointer-events-none mix-blend-screen ${
-              metrics.riskLevel === 'CRITICAL' ? 'bg-red-500/40' : 
-              metrics.riskLevel === 'HIGH' ? 'bg-orange-500/30' : 'bg-cyan-500/20'
-            }`}
+            className={`absolute rounded-full blur-xl transition-all duration-500 pointer-events-none mix-blend-screen ${metrics.riskLevel === 'CRITICAL' ? 'bg-red-500/40' :
+                metrics.riskLevel === 'HIGH' ? 'bg-orange-500/30' : 'bg-cyan-500/20'
+              }`}
             style={{
               left: `${p.x}%`,
               top: `${p.y}%`,
@@ -76,7 +75,7 @@ export const GeoMap: React.FC<GeoMapProps> = ({ metrics, detections }) => {
               ID_{d.id.slice(-4)}: [{(d.box_2d[1]).toFixed(0)}, {(d.box_2d[0]).toFixed(0)}]
             </div>
           )) : (
-             <div className="text-[9px] text-slate-600 italic">No targets acquired</div>
+            <div className="text-[9px] text-slate-600 italic">No targets acquired</div>
           )}
         </div>
       </div>
@@ -84,12 +83,12 @@ export const GeoMap: React.FC<GeoMapProps> = ({ metrics, detections }) => {
       {/* Map Legend */}
       <div className="absolute bottom-8 left-8 flex flex-col gap-3 glass p-4 rounded-xl border border-white/5 z-20">
         <div className="flex items-center gap-3">
-           <div className="w-2 h-2 rounded-full bg-cyan-500 shadow-[0_0_10px_#22d3ee]"></div>
-           <span className="text-[10px] font-bold text-slate-300 uppercase">Detection</span>
+          <div className="w-2 h-2 rounded-full bg-cyan-500 shadow-[0_0_10px_#22d3ee]"></div>
+          <span className="text-[10px] font-bold text-slate-300 uppercase">Detection</span>
         </div>
         <div className="flex items-center gap-3">
-           <div className="w-2 h-2 rounded-full bg-red-500 blur-[2px]"></div>
-           <span className="text-[10px] font-bold text-slate-300 uppercase">High Density</span>
+          <div className="w-2 h-2 rounded-full bg-red-500 blur-[2px]"></div>
+          <span className="text-[10px] font-bold text-slate-300 uppercase">High Density</span>
         </div>
       </div>
     </div>
