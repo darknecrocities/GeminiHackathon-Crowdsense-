@@ -36,10 +36,11 @@ Managing large crowds at stadiums, transport hubs, and public events is traditio
 7.  **Counter-Flow Detection:** Specifically identifies individuals or groups moving against the primary flow of traffic—often the earliest warning sign of a blockage or emergency upstream.
 8.  **BYOM (Bring Your Own Model):** A hot-swappable inference engine. Security teams can drag-and-drop custom trained `.onnx` models (YOLOv8/v10/v11) to optimize for specific environments (e.g., thermal cameras or drone footage).
 
-### 🛠️ Operational Resilience
-9.  **Synthetic Scenario Engine:** A built-in "Digital Twin" simulator that generates GPU-accelerated crowd particles. This allows commanders to stress-test their response protocols against theoretical surges without risking real lives.
-10. **Legacy Protocol Bridge:** A smart ingestion layer that modernizes old infrastructure. It intelligently transcodes and buffers RTSP/MJPEG streams from aging IP cameras, allowing 10-year-old CCTV systems to run state-of-the-art AI.
-11. **Audio Ambience Analysis:** Using Gemini 3.0 Multimodal capabilities to detect screams or panic in audio streams.
+### 🛠️ The "Butter-Smooth" Algorithm
+9.  **Greedy-Match Tracking (Bubble-Style Logic):** To ensure maximum speed with zero overhead, we implemented a greedy IoU (Intersection over Union) matching algorithm. Much like a **Bubble Sort**, it iteratively compares incoming detections with existing tracks to find the optimal pair, ensuring persistent identities with minimal computational cost.
+10. **EMA Smoothing Engine:** We eliminate "visual jitter" using **Exponential Moving Average (EMA)** filtering ($\alpha = 0.3$). This mathematically glides the bounding boxes between frames, providing a "butter-smooth" high-fidelity experience that masks raw model fluctuations.
+11. **Zero-Lag Polling Loop:** By decoupling the inference loop and optimizing it to a **50ms (20 FPS)** heartbeat, we achieve highly responsive tracking that feels native to the video hardware, bypassing traditional browser-based inference lagginess.
+
 ---
 
 ## 🛠️ Tech Stack
