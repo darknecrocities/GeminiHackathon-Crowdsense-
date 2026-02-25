@@ -143,6 +143,88 @@ erDiagram
 
 ---
 
+## 🧬 Deep Dive: Crowd Risk Intelligence Algorithm
+
+### 3.1 System Overview
+CrowdSense™ implements a **Hybrid Edge–Cloud Intelligence Architecture** composed of:
+- **Edge-based object detection** (EfficientDet-Lite0)
+- **Multi-object tracking** (ByteTrack-lite)
+- **Motion smoothing** (Exponential Moving Average)
+- **Real-time crowd metric extraction**
+- **Cloud-based predictive reasoning** using Google Gemini 3.0 Flash
+
+### 3.2 Edge-Based Object Detection
+The system uses **EfficientDet-Lite0**, deployed via MediaPipe Tasks Vision in WebAssembly.
+- **Model Logic:** Uses a Bi-directional Feature Pyramid Network (BiFPN) and compound scaling to balance accuracy and latency.
+- **Performance:** Optimized for browser-level inference at ~20 FPS.
+- **Output ($D$):** For each frame, it identifies $D = \{(b_i, c_i, s_i)\}$ where $b$ is the box, $c$ the class, and $s$ the confidence score.
+
+### 3.3 Multi-Object Tracking: ByteTrack-lite
+To maintain persistent identity across frames, we use a lightweight adaptation of **ByteTrack**.
+- **Greedy IoU Matching:**
+  $$IoU = \frac{\text{Area of Intersection}}{\text{Area of Union}}$$
+- **Logic:** Matches detections to tracks with the highest IoU. If $IoU \ge 0.3$, the ID is preserved; otherwise, a new track is initialized. This ensures $O(n^2)$ time complexity stability even in dense crowds.
+
+### 3.4 Exponential Moving Average (EMA) Smoothing
+To eliminate visual jitter, we apply an EMA filter to bounding box coordinates:
+$$B_{t}^{smooth} = \alpha B_{t} + (1 - \alpha) B_{t-1}^{smooth}$$
+- **Factor ($\alpha$):** Set to `0.3` for the optimal balance between responsiveness and "butter-smooth" stability.
+
+### 3.5 Crowd Metric Computation
+1. **People Count:** Total active track set $|T|$.
+2. **Density Estimation:** $Density = \frac{PeopleCount}{Area_{zone}}$ (measured in $p/m^2$).
+3. **Flow Velocity:** Average displacement of centroids over time.
+4. **Agitation Index:** $Var(Velocity_i)$—high variance flags potential panic or dispersal.
+5. **Panic Index:** A weighted heuristic:
+   $$PanicIndex = \lambda_1 Density + \lambda_2 Agitation + \lambda_3 CounterFlowRatio$$
+
+### 3.6 Counter-Flow Detection
+Identifies individuals moving against the primary flow vector:
+$$\text{If } (Velocity_i \cdot V_{primary} < 0) \to \text{Flag as Counter-Flow}$$
+High counter-flow ratios act as early warning triggers for upstream obstructions.
+
+### 3.7 Reasoning Layer (Gemini 3.0 Flash)
+Only anonymized telemetry is transmitted to avoid privacy breaches:
+```json
+{
+  "peopleCount": 184,
+  "density": 4.1,
+  "flowRate": 1.2,
+  "agitationLevel": 0.85,
+  "panicIndex": 0.72
+}
+```
+Gemini acts as the **Strategic Commander**, predicting spikes 30–90 seconds ahead and generating tactical SOPs.
+
+### 3.8 Risk Classification (Defcon Levels)
+| Level | Condition |
+| :--- | :--- |
+| **Low** | Density < 2 p/m² |
+| **Moderate** | 2–4 p/m² |
+| **High** | > 4 p/m² |
+| **Critical** | > 5 p/m² + High Agitation |
+
+### 3.9 Advantages & Limitations
+| **Advantages** | **Limitations** |
+| :--- | :--- |
+| **Privacy-focused**: No raw video leaves the edge. | **Occlusion**: Tracking may struggle in extremely dense crowds. |
+| **Zero Lag**: 50ms inference heartbeat. | **Depth Ambiguity**: Single-camera perspective issues. |
+| **Predictive**: Gemini forecasts risks before they happen. | **Lighting**: Performance depends on environment visibility. |
+
+### 3.10 Summary of Algorithmic Pipeline
+```mermaid
+graph LR
+    A[Video Frame] --> B[EfficientDet-Lite0 Detection]
+    B --> C[ByteTrack-lite Association]
+    C --> D[EMA Smoothing]
+    D --> E[Metric Extraction]
+    E --> F[Metadata Serialization]
+    F --> G[Gemini Risk Prediction]
+    G --> H[Tactical Protocol Generation]
+```
+
+---
+
 ## 📦 Getting Started
 
 ### Prerequisites
